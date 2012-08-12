@@ -72,6 +72,7 @@ tda_instance our_instance;
 static struct cdev our_cdev, *this_cdev=&our_cdev;
 static int initialized = 0;
 static int saved_mode = -1;
+static cec_callback_t cec_callback = NULL;
 #ifdef ANDROID_DSS
 static struct omap_video_timings video_640x480at60Hz_panel_timings = {
    .x_res          = 640,
@@ -785,7 +786,8 @@ static void interrupt_polling(struct work_struct *dummy)
    TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
 
    /* CEC part */
-   if (this->driver.cec_callback) this->driver.cec_callback(dummy);
+   if (this->driver.cec_callback)
+	this->driver.cec_callback(dummy);
 
    /* FIX : IT anti debounce */
    TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
@@ -852,7 +854,10 @@ void register_cec_interrupt(cec_callback_t fct)
 {
    tda_instance *this=&our_instance;
 
-   this->driver.cec_callback = fct;
+   if (initialized) 
+	this->driver.cec_callback = fct;
+   else
+	cec_callback = fct;
 }
 EXPORT_SYMBOL(register_cec_interrupt);
 
@@ -860,6 +865,7 @@ void unregister_cec_interrupt(void)
 {
    tda_instance *this=&our_instance;
 
+   cec_callback = NULL;
    this->driver.cec_callback = NULL;
 }
 EXPORT_SYMBOL(unregister_cec_interrupt);
@@ -2417,6 +2423,11 @@ static int __init tx_init(void)
 	this->tda.setio.video_in.format = saved_mode;
 	this->tda.setio.video_out.format = saved_mode;
 	show_video(this);
+   }
+
+   /* enable cec callback */
+   if (cec_callback) {
+	this->driver.cec_callback = cec_callback;
    }
 
    return 0;

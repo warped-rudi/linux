@@ -58,15 +58,11 @@ static unsigned int cubox_mpp_list[] __initdata = {
 	MPP13_AD1_I2S_EXT_MCLK,	/* i2s1 external clock input */
 	MPP18_GPIO18,		/* red LED */
 	MPP19_GPIO19,		/* IR sensor */
-#if 0
-	/* Not supported for now - FIXME */
-	MPP27_GPIO27,     /* HDMI interrupt */
-#endif
 	0
 };
 
 static unsigned int cubox_mpp_grp_list[] __initdata = {
-	MPP_GRP_24_39_GPIO,
+	MPP_GRP_24_39_GPIO,	/* HDMI interrupt on GPIO27 */
 	MPP_GRP_40_45_SD0,
 	MPP_GRP_46_51_GPIO,
 	MPP_GRP_62_63_UA1,

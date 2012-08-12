@@ -447,12 +447,20 @@ static void cec_on(cec_instance *this)
 
    disable_irq(gpio_to_irq(TDA_IRQ_CALIB));
 
+   /* turn GPIO into calib pulse generator */
+   err = gpio_direction_output(TDA_IRQ_CALIB,0); /* output (1 means try-state or high) */
+   if (err < 0) {
+	LOG(KERN_ERR,"%s: Cannot access GPIO %d, err:%d\n",__func__,TDA_IRQ_CALIB,err);
+
+	enable_irq(gpio_to_irq(TDA_IRQ_CALIB));
+	return;
+   }
+
+   __gpio_set_value(TDA_IRQ_CALIB,1);
+
    this->cec.power = tmPowerOn;
    TRY(tmdlHdmiCecSetPowerState(this->cec.inst,this->cec.power));
 
-   /* turn GPIO into calib pulse generator */
-   gpio_direction_output(TDA_IRQ_CALIB,0); /* output (1 means try-state or high) */
-   __gpio_set_value(TDA_IRQ_CALIB,1);
    this->cec.clock = TMDL_HDMICEC_CLOCK_FRO;
    TRY(tmdlHdmiCecEnableCalibration(this->cec.inst,this->cec.clock));
    msleep(10);
@@ -476,14 +484,12 @@ static void cec_on(cec_instance *this)
    this->cec.setup.cecClockSource = this->cec.clock;
    TRY(tmdlHdmiCecInstanceSetup(this->cec.inst,&this->cec.setup));
 
-   /* turn GPIO into IRQ */
-   gpio_direction_input(TDA_IRQ_CALIB);
-   enable_irq(gpio_to_irq(TDA_IRQ_CALIB));
-
    LOG(KERN_INFO,"standby --> on\n");
 
  TRY_DONE:
-   (void)0;
+   /* turn GPIO into IRQ */
+   gpio_direction_input(TDA_IRQ_CALIB);
+   enable_irq(gpio_to_irq(TDA_IRQ_CALIB));
 }
 
 /*
@@ -1905,7 +1911,7 @@ static int __devinit this_i2c_probe(struct i2c_client *client, const struct i2c_
    /* FRO calibration */
    err=gpio_request(TDA_IRQ_CALIB,"tda19989 calibration");
    if (err < 0) {
-      printk(KERN_ERR "hdmicec:%s:cannot use GPIO 107\n",__func__);
+      printk(KERN_ERR "hdmicec:%s:Cannot use GPIO %d, err:%d\n",__func__,TDA_IRQ_CALIB,err);
       goto i2c_out;
    }
    /* turn GPIO into IRQ */
