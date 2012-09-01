@@ -539,24 +539,25 @@ static void insert_char(struct vc_data *vc, unsigned int nr)
 {
 	unsigned short *p = (unsigned short *) vc->vc_pos;
 
-	scr_memmovew(p + vc->vc_cols - nr - vc->vc_x, p, vc->vc_cols - vc->vc_x);
+	scr_memmovew(p + nr, p, vc->vc_cols - vc->vc_x);
 	scr_memsetw(p, vc->vc_video_erase_char, nr * 2);
 	vc->vc_need_wrap = 0;
 	if (DO_UPDATE(vc))
 		do_update_region(vc, (unsigned long) p,
-			vc->vc_cols - vc->vc_x);
+			(vc->vc_cols - vc->vc_x) / 2 + 1);
 }
 
 static void delete_char(struct vc_data *vc, unsigned int nr)
 {
 	unsigned short *p = (unsigned short *) vc->vc_pos;
 
-	scr_memmovew(p, p + nr, vc->vc_cols - vc->vc_x - nr);
-	scr_memsetw(p + vc->vc_cols - vc->vc_x - nr, vc->vc_video_erase_char, nr * 2);
+	scr_memcpyw(p, p + nr, vc->vc_cols - vc->vc_x - nr);
+	scr_memsetw(p + vc->vc_cols - vc->vc_x - nr, vc->vc_video_erase_char,
+			nr * 2);
 	vc->vc_need_wrap = 0;
 	if (DO_UPDATE(vc))
 		do_update_region(vc, (unsigned long) p,
-			vc->vc_cols - vc->vc_x);
+			(vc->vc_cols - vc->vc_x) / 2);
 }
 
 static int softcursor_original;
@@ -1153,25 +1154,10 @@ static void csi_J(struct vc_data *vc, int vpar)
 		case 0:	/* erase from cursor to end of display */
 			count = (vc->vc_scr_end - vc->vc_pos) >> 1;
 			start = (unsigned short *)vc->vc_pos;
-			if (DO_UPDATE(vc)) {
-				/* do in two stages */
-				vc->vc_sw->con_clear(vc, vc->vc_y, vc->vc_x, 1,
-					      vc->vc_cols - vc->vc_x);
-				vc->vc_sw->con_clear(vc, vc->vc_y + 1, 0,
-					      vc->vc_rows - vc->vc_y - 1,
-					      vc->vc_cols);
-			}
 			break;
 		case 1:	/* erase from start to cursor */
 			count = ((vc->vc_pos - vc->vc_origin) >> 1) + 1;
 			start = (unsigned short *)vc->vc_origin;
-			if (DO_UPDATE(vc)) {
-				/* do in two stages */
-				vc->vc_sw->con_clear(vc, 0, 0, vc->vc_y,
-					      vc->vc_cols);
-				vc->vc_sw->con_clear(vc, vc->vc_y, 0, 1,
-					      vc->vc_x + 1);
-			}
 			break;
 		case 3: /* erase scroll-back buffer (and whole display) */
 			scr_memsetw(vc->vc_screenbuf, vc->vc_video_erase_char,
@@ -1183,15 +1169,13 @@ static void csi_J(struct vc_data *vc, int vpar)
 		case 2: /* erase whole display */
 			count = vc->vc_cols * vc->vc_rows;
 			start = (unsigned short *)vc->vc_origin;
-			if (DO_UPDATE(vc))
-				vc->vc_sw->con_clear(vc, 0, 0,
-					      vc->vc_rows,
-					      vc->vc_cols);
 			break;
 		default:
 			return;
 	}
 	scr_memsetw(start, vc->vc_video_erase_char, 2 * count);
+	if (DO_UPDATE(vc))
+		do_update_region(vc, (unsigned long) start, count);
 	vc->vc_need_wrap = 0;
 }
 
