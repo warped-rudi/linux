@@ -229,9 +229,7 @@ tmErrorCode_t tmdlHdmiCecHandleInterrupt
   unsigned char  I2c_ReadBuffer[19] ;   /* I2C Read data buffer */
   tmdlHdmiCecDriverConfigTable_t *pDis; /* Pointer to Device Instance Structure */
   tmdlHdmiCecUnitConfig_t        *pCecObject; /* Pointer to Cec Object */
-  tmdlHdmiCecFrameFormat_t  ReadFrame;
   tmdlHdmiCecSaveMessage_t  LastSendMessage;
-  int i;
 
 
   pDis = &gtmdlHdmiCecDriverConfigTable[instance];
@@ -250,52 +248,35 @@ tmErrorCode_t tmdlHdmiCecHandleInterrupt
 #endif
 
   errCode = getCecHwRegisters(pDis, E_REG_CDR0,I2c_ReadBuffer,19);
-  RETIF(errCode != TM_OK, errCode)
-     
-  /*Fill Frame structure with read data*/
+  RETIF((errCode != TM_OK || I2c_ReadBuffer[0] < 2), errCode)
 
-  /* Case of Receiving CECData.cnf*/
-  /*Inform Success or reason of failure of CEC message sending*/
-  if (I2c_ReadBuffer[1]== 0x01)
+  if (I2c_ReadBuffer[1] == 0x81)
   {
-    /* Get Infos of last message send */ 
-    getCecLastMessage(&LastSendMessage);
-	
-    if (LastSendMessage.MessageTypePolling)
-    {
-     ReadFrame.FrameByteCount = I2c_ReadBuffer[0];
-     ReadFrame.AddressByte = LastSendMessage.AddressByte;
-     ReadFrame.DataBytes[0]= I2c_ReadBuffer[2];
-    }
-    else
-    {
-     ReadFrame.FrameByteCount = I2c_ReadBuffer[0]+1;
-     ReadFrame.AddressByte = LastSendMessage.AddressByte;
-     ReadFrame.DataBytes[0]= I2c_ReadBuffer[2];
-     ReadFrame.DataBytes[1]= LastSendMessage.Opcode;
-    }
-    
-    pCecObject->MessageCallback(TMDL_HDMICEC_CALLBACK_STATUS
-                               , (Void *) &ReadFrame, ReadFrame.FrameByteCount);
+    /* Case of Receiving CECData.ind*/
+    /*Give receive data from CEC bus*/
+
+    pCecObject->MessageCallback(TMDL_HDMICEC_CALLBACK_MESSAGE_AVAILABLE,
+                                &I2c_ReadBuffer[2], I2c_ReadBuffer[0] - 2);
   }
-
-  /* Case of Receiving CECData.ind*/
-  /*Give receive data from CEC bus*/
-  if (I2c_ReadBuffer[1]== 0x81)
+  else if (I2c_ReadBuffer[1]== 0x01)
   {
-    ReadFrame.FrameByteCount = I2c_ReadBuffer[0];
-    ReadFrame.AddressByte = I2c_ReadBuffer[2];
-    for (i=0; i<15; i++)
-    {
-    ReadFrame.DataBytes[i] = I2c_ReadBuffer[i+3];
-    }
+    /* Case of Receiving CECData.cnf*/
+    /*Inform Success or reason of failure of CEC message sending*/
 
-    pCecObject->MessageCallback(TMDL_HDMICEC_CALLBACK_MESSAGE_AVAILABLE
-                               , (Void *) &ReadFrame, ReadFrame.FrameByteCount);
+    getCecLastMessage(&LastSendMessage);
+
+    /* Append saved OpCode */
+    if (!LastSendMessage.MessageTypePolling)
+      I2c_ReadBuffer[I2c_ReadBuffer[0]++] = LastSendMessage.Opcode;
+
+    /* Prepend saved AddressByte */
+    I2c_ReadBuffer[1] = LastSendMessage.AddressByte;
+
+    pCecObject->MessageCallback(TMDL_HDMICEC_CALLBACK_STATUS,
+                                &I2c_ReadBuffer[1], I2c_ReadBuffer[0] - 1);
   }
 
   return(TM_OK);
-
 }
 
 //==========================================================================

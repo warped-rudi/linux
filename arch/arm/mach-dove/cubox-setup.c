@@ -222,10 +222,8 @@ static struct platform_device cubox_extclk = {
 
 /*****************************************************************************
  * I2C devices:
- *      ALC5630 codec, address 0x
- *      Battery charger, address 0x??
- *      G-Sensor, address 0x??
- *      MCU PIC-16F887, address 0x??
+ *      Silicon Labs Si5351 programmable clock generator
+ *      NXP TDA19989 HDMI transmitter with CEC support
  ****************************************************************************/
 static struct i2c_board_info __initdata dove_cubox_i2c_bus0_devs[] = {
 	{
@@ -235,6 +233,7 @@ static struct i2c_board_info __initdata dove_cubox_i2c_bus0_devs[] = {
 #ifdef CONFIG_TDA19988
 	{ /* First CEC that enables 0x70 for HDMI */
 		I2C_BOARD_INFO("tda99Xcec", 0x34), .irq = 91,
+                .platform_data = "CuBox"   
 	},
 	{
 		I2C_BOARD_INFO("tda998X", 0x70), .irq = 91,

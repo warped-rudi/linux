@@ -13,7 +13,7 @@
 #include "tmdlHdmiCEC.h"
 #include "tmdlHdmiCEC_cfg.h"
 
-static struct i2c_client *cecGetThisI2cClient(void);
+struct i2c_client *cecGetThisI2cClient(void);
 static unsigned char  my_i2c_data[255];
 
 /*============================================================================*/
@@ -347,28 +347,29 @@ static int read_reg(struct i2c_client *client, u16 data_length, u8 reg, u8 *val)
 
 tmErrorCode_t I2cReadFunction (tmdlHdmiCecSysArgs_t *pSysArgs)
 {
-   tmErrorCode_t errCode = TM_OK;
-   u16 outLenght=0;
-   struct i2c_client *client=cecGetThisI2cClient();
-   u32 client_main_addr=client->addr;
+   tmErrorCode_t errCode = TM_ERR_NULL_DATAINFUNC;
+   struct i2c_client *client = cecGetThisI2cClient();
 
-   /* DevLib needs address control, so let it be */ 
-   client->addr=pSysArgs->slaveAddr;
+   if (client) {
+      u16 inLength = 0;
+      u32 client_main_addr = client->addr;
 
-   if (pSysArgs->lenData == 1) {
-      /* single byte */
-      errCode = read_reg(cecGetThisI2cClient(),1,pSysArgs->firstRegister,pSysArgs->pData);
-   }
-   else {
-      /* block */
-      errCode = blockread_reg(cecGetThisI2cClient(),1, \
-			      pSysArgs->firstRegister, \
-			      pSysArgs->lenData, \
-			      pSysArgs->pData, &outLenght);
-   }
+      /* DevLib needs address control, so let it be */ 
+      client->addr = pSysArgs->slaveAddr;
+
+      if (pSysArgs->lenData == 1) {
+         /* single byte */
+         errCode = read_reg(client, 1, pSysArgs->firstRegister, pSysArgs->pData);
+      }
+      else {
+         /* block */
+         errCode = blockread_reg(client, 1, pSysArgs->firstRegister,
+			         pSysArgs->lenData, pSysArgs->pData, &inLength);
+      }
    
-   /* restore default client address */
-   client->addr=client_main_addr;
+      /* restore default client address */
+      client->addr = client_main_addr;
+   }
 
    return errCode;
 }
@@ -376,32 +377,31 @@ tmErrorCode_t I2cReadFunction (tmdlHdmiCecSysArgs_t *pSysArgs)
 
 tmErrorCode_t I2cWriteFunction(tmdlHdmiCecSysArgs_t *pSysArgs)
 {
+   tmErrorCode_t errCode = TM_ERR_NULL_DATAOUTFUNC;
+   struct i2c_client *client = cecGetThisI2cClient();
 
-   tmErrorCode_t errCode = TM_OK;
-   u16 outLenght=0;
-   struct i2c_client *client=cecGetThisI2cClient();
-   u32 client_main_addr=client->addr;
+   if (client) {
+      u16 outLength = 0;
+      u32 client_main_addr = client->addr;
 
-   /* DevLib needs address control, so let it be */ 
-   client->addr=pSysArgs->slaveAddr;
+      /* DevLib needs address control, so let it be */ 
+      client->addr = pSysArgs->slaveAddr;
    
-   if (pSysArgs->lenData == 1) {
-      /* single byte */
-      errCode = write_reg(cecGetThisI2cClient(),pSysArgs->firstRegister,*pSysArgs->pData);
-   }
-   else {
-      /* block */
-      errCode = blockwrite_reg(cecGetThisI2cClient(),  \
-                               pSysArgs->firstRegister, \
-                               pSysArgs->lenData,       \
-                               pSysArgs->pData,&outLenght);
-   }
+      if (pSysArgs->lenData == 1) {
+         /* single byte */
+         errCode = write_reg(client, pSysArgs->firstRegister, *pSysArgs->pData);
+      }
+      else {
+         /* block */
+         errCode = blockwrite_reg(client, pSysArgs->firstRegister,
+                                  pSysArgs->lenData, pSysArgs->pData, &outLength);
+      }
    
-   /* restore default client address */
-   client->addr=client_main_addr;
+      /* restore default client address */
+      client->addr = client_main_addr;
+   }
 
    return errCode;
-
 }
 
 static tmErrorCode_t tmdlHdmiTxIWWait

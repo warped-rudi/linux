@@ -56,8 +56,8 @@ tmErrorCode_t TxI2cWriteFunction(tmbslHdmiTxSysArgs_t *pSysArgs);
  *                 THIS PART CAN BE MODIFIED BY CUSTOMER                      *
  ******************************************************************************
  *****************************************************************************/
-static struct i2c_client *GetThisI2cClient(void);
-unsigned char  my_i2c_data[255];
+struct i2c_client *GetThisI2cClient(void);
+static unsigned char  my_i2c_data[255];
 
 /* The following includes are used by I2C access function. If    */
 /* you need to rewrite these functions for your own SW infrastructure, then   */
@@ -392,29 +392,31 @@ int read_reg(struct i2c_client *client, u16 data_length, u8 reg, u8 *val)
 /* tmbslHdmiTxSysArgs_t definition is located into tmbslHdmiTx_type.h file.   */
 tmErrorCode_t TxI2cReadFunction(tmbslHdmiTxSysArgs_t *pSysArgs)
 {
-   tmErrorCode_t errCode = TM_OK;
-   struct i2c_client *client=GetThisI2cClient();
-   u32 client_main_addr=client->addr;
+   tmErrorCode_t errCode = TM_ERR_NULL_DATAINFUNC;
+   struct i2c_client *client = GetThisI2cClient();
 
-   /* DevLib needs address control, so let it be */ 
-   client->addr=pSysArgs->slaveAddr;
+   if (client) {
+      u32 client_main_addr = client->addr;
 
-   if (pSysArgs->lenData == 1) {
-      /* single byte */
-      errCode = read_reg(GetThisI2cClient(),1,pSysArgs->firstRegister,pSysArgs->pData);
-   }
-   else {
-      /* block */
-      errCode = blockread_reg(GetThisI2cClient(), \
-			      pSysArgs->firstRegister, \
-			      pSysArgs->lenData, \
-			      pSysArgs->pData);
-   }
+      /* DevLib needs address control, so let it be */ 
+      client->addr = pSysArgs->slaveAddr;
+
+      if (pSysArgs->lenData == 1) {
+         /* single byte */
+         errCode = read_reg(client, 1,
+			    pSysArgs->firstRegister, pSysArgs->pData);
+      }
+      else {
+         /* block */
+         errCode = blockread_reg(client, pSysArgs->firstRegister,
+				 pSysArgs->lenData, pSysArgs->pData);
+      }
    
-   /* restore default client address */
-   client->addr=client_main_addr;
+      /* restore default client address */
+      client->addr = client_main_addr;
+   }
 
-    return errCode;
+   return errCode;
 }
 
 /* The following function must be rewritten by the customer to fit its own    */
@@ -422,29 +424,30 @@ tmErrorCode_t TxI2cReadFunction(tmbslHdmiTxSysArgs_t *pSysArgs)
 /* tmbslHdmiTxSysArgs_t definition is located into tmbslHdmiTx_type.h file.   */
 tmErrorCode_t TxI2cWriteFunction(tmbslHdmiTxSysArgs_t *pSysArgs)
 {
-   tmErrorCode_t  errCode = TM_OK;
-   struct i2c_client *client=GetThisI2cClient();
-   u32 client_main_addr=client->addr;
+   tmErrorCode_t errCode = TM_ERR_NULL_DATAOUTFUNC;
+   struct i2c_client *client = GetThisI2cClient();
 
-   /* DevLib needs address control, so let it be */ 
-   client->addr=pSysArgs->slaveAddr;
-   
-   if (pSysArgs->lenData == 1) {
-      /* single byte */
-      errCode = write_reg(GetThisI2cClient(),pSysArgs->firstRegister,*pSysArgs->pData);
-   }
-   else {
-      /* block */
-      errCode = blockwrite_reg(GetThisI2cClient(),  \
-                               pSysArgs->firstRegister, \
-                               pSysArgs->lenData,       \
-                               pSysArgs->pData);
-   }
-   
-   /* restore default client address */
-   client->addr=client_main_addr;
+   if (client) {
+      u32 client_main_addr = client->addr;
 
-    return errCode;
+      /* DevLib needs address control, so let it be */ 
+      client->addr = pSysArgs->slaveAddr;
+   
+      if (pSysArgs->lenData == 1) {
+         /* single byte */
+         errCode = write_reg(client, pSysArgs->firstRegister, *pSysArgs->pData);
+      }
+      else {
+         /* block */
+         errCode = blockwrite_reg(client, pSysArgs->firstRegister,
+				  pSysArgs->lenData, pSysArgs->pData);
+      }
+   
+      /* restore default client address */
+      client->addr = client_main_addr;
+   }
+
+   return errCode;
 }
 
 
