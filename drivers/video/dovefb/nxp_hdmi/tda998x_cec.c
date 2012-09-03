@@ -520,7 +520,7 @@ static void cec_listen_single(cec_instance *this, unsigned char rx_addr)
 {
    int err;
 
-   LOG(KERN_INFO,"logAddr 0x%x\n", rx_addr);
+   LOG(KERN_INFO,"logAddr set to 0x%x\n", rx_addr);
 
    TRY(tmdlHdmiCecSetLogicalAddress(this->cec.inst, rx_addr));
 
@@ -761,7 +761,7 @@ static void eventCallbackCEC(tmdlHdmiCecEvent_t event, unsigned char *data, unsi
             receiver  = frame->addr & 0x0F;
             opcode    = frame->data[0];
             LOG(KERN_INFO,"hdmicec:Rx:[%x--->%x] %s length:%d [%02x %02x %02x %02x]\n",
-               initiator,receiver,cec_opcode(opcode),length, 
+               initiator,receiver,length ? cec_opcode(opcode) : "POLL",length, 
                frame->data[0], frame->data[1], frame->data[2], frame->data[3]);
 
             this->driver.read_queue_tail = new_tail;
@@ -1200,7 +1200,7 @@ static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long 
          {
             int len;
             cec_raw_info info;
-            
+
             info.VendorID = this->cec.vendor_id;
             info.QueueSize = ARRAY_SIZE(this->driver.read_queue);
             info.LogicalAddress = this->cec.rx_addr;
@@ -2061,7 +2061,7 @@ static ssize_t this_cdev_read(struct file *pFile, char *buffer, size_t length, l
       bytes_returned += sizeof(cec_frame);
    }
 
-   LOG(KERN_INFO,"%d bytes\n",bytes_returned);
+//LOG(KERN_INFO,"%d bytes\n",bytes_returned);
 
    return bytes_returned;
 }
@@ -2100,7 +2100,7 @@ static ssize_t this_cdev_write(struct file *pFile, const char *buffer, size_t le
       }
    }
 
-   LOG(KERN_INFO,"%d bytes\n",bytes_written);
+//LOG(KERN_INFO,"%d bytes\n",bytes_written);
 
    up(&this->driver.sem);
    return bytes_written;
@@ -2165,16 +2165,7 @@ static int this_cdev_release(struct inode *pInode, struct file *pFile)
          wake_up_interruptible(&this->driver.wait_write);
          wake_up_interruptible(&this->driver.wait_read);
 
-   LOG(KERN_INFO,"releasing RAW mode (1) i2c_client=%08x %08x %01x\n", 
-	this->driver.i2c_client, our_instance.driver.i2c_client, this->cec.rx_addr);
-
-#if 0
          cec_listen_single(this, this->cec.rx_addr);
-#else
-         this->cec.rx_addr_mask = 0x8000;
-         cec_listen_multi(this, 1 << this->cec.rx_addr, ~(1 << this->cec.rx_addr));
-#endif
-
       }
 
       pFile->private_data = NULL;
@@ -2206,24 +2197,8 @@ static int __devinit this_i2c_probe(struct i2c_client *client, const struct i2c_
       return -ENODEV;
    }
 
-#if 0
-   this->driver.i2c_client = kmalloc(sizeof(struct i2c_client), GFP_KERNEL);
-   if (!this->driver.i2c_client) {
-      return -ENOMEM;
-   }
-   memset(this->driver.i2c_client, 0, sizeof(struct i2c_client));
-
-   strncpy(this->driver.i2c_client->name, CEC_NAME, I2C_NAME_SIZE - 1);
-   this->driver.i2c_client->addr = TDA99XCEC_I2C_SLAVEADDRESS;
-   this->driver.i2c_client->adapter = client->adapter;
-
-   i2c_set_clientdata(client, this->driver.i2c_client);
-#else
-
    this->driver.i2c_client = client;
    i2c_set_clientdata(client, this);
-
-#endif
 
    tmdlHdmiCecGetSWVersion(&this->cec.sw_version);
    LOG(KERN_INFO,"HDMI CEC SW Version:%lu.%lu compatibility:%lu\n", \
@@ -2290,9 +2265,7 @@ static int __devinit this_i2c_probe(struct i2c_client *client, const struct i2c_
  i2c_out:
    LOG(KERN_INFO,"HDMICEC eject: this->driver.i2c_client removed\n");
    tmdlHdmiCecClose(this->cec.inst);
-#if 0
-   kfree(this->driver.i2c_client);
-#endif
+
    this->driver.i2c_client = NULL;
 
    return err;
@@ -2315,9 +2288,7 @@ static int this_i2c_remove(struct i2c_client *client)
               __func__);
       return -ENODEV;
    }
-#if 0
-   kfree(this->driver.i2c_client);
-#endif
+
    this->driver.i2c_client = NULL;
 
    return err;
