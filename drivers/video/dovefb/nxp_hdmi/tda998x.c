@@ -41,7 +41,9 @@
 /* local */
 #include "tda998x_version.h"
 #include "tda998x.h"
+#include "tda998x_i2c.h"
 #include "tda998x_ioctl.h"
+#include "tda998x_exports.h"
 
 #ifdef I2C_DBG
 #include "tmbslHdmiTx_types.h"
@@ -204,16 +206,15 @@ MODULE_PARM_DESC(major, "The major number of the device mapper");
 /* 
  *  Get main and unique I2C Client driver handle
  */
-struct i2c_client *GetThisI2cClient(void)
+struct i2c_client *txGetThisI2cClient(void)
 {
-   tda_instance *this=&our_instance;
-   return this->driver.i2c_client;
+   return our_instance.driver.i2c_client;
 }
 
 /*
  * error handling
  */
-char *hdmi_tx_err_string(int err)
+static char *hdmi_tx_err_string(int err)
 {
    switch (err & 0x0FFF)
       {
@@ -2478,3 +2479,4 @@ module_exit(tx_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andre Lepine <andre.lepine@nxp.com>");
 MODULE_DESCRIPTION(HDMITX_NAME " driver");
+

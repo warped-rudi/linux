@@ -41,7 +41,9 @@
 /* local */
 #include "tda998x_version.h"
 #include "tda998x_cec.h"
+#include "tda998x_i2c.h"
 #include "tda998x_ioctl.h"
+#include "tda998x_exports.h"
 
 /*
  *
@@ -69,18 +71,6 @@ struct input_dev *gkp_input;
 extern struct input_dev *get_twm4030_input(void);
 #endif
 
-/*
- * Dependancies to HdmiTx module
- */
-
-extern void register_cec_interrupt(cec_callback_t fct); 
-extern void unregister_cec_interrupt(void); 
-extern short edid_phy_addr(void); 
-extern int hdmi_enable(void);
-extern int hdmi_disable(int event_tracking);
-extern cec_power get_hdmi_status(void);
-extern cec_power get_hpd_status(void);
-extern int edid_received(void);
 
 /*
  *  Module params
@@ -151,6 +141,9 @@ static char *hdmi_cec_err_string(int err)
       }
 }
 
+#ifndef CEC_I2C_DEBUG
+static
+#endif
 char *cec_opcode(int op)
 {
    switch (op)
@@ -543,8 +536,6 @@ static void cec_listen_multi(cec_instance *this,
    newMask = (this->cec.rx_addr_mask | onMask) & ~(offMask | 0x8000);
    changeMask = newMask ^ this->cec.rx_addr_mask; 
 
-LOG(KERN_INFO,"newMask 0x%04x, changeMask 0x%04x\n", newMask, changeMask);
-
    if (changeMask & 0xff00) {
        TRY(tmdlHdmiCecSetRegister(this->cec.inst, E_REG_ACKH, newMask >> 8));
        this->cec.rx_addr_mask ^= changeMask & 0xff00;
@@ -555,7 +546,7 @@ LOG(KERN_INFO,"newMask 0x%04x, changeMask 0x%04x\n", newMask, changeMask);
        this->cec.rx_addr_mask ^= changeMask & 0x00ff;
    }
 
-LOG(KERN_INFO,"resultMask 0x%04x\n", this->cec.rx_addr_mask);
+   LOG(KERN_INFO,"logAddrMask is now 0x%04x\n", this->cec.rx_addr_mask);
 
  TRY_DONE:
    (void)0;
@@ -752,16 +743,16 @@ static void eventCallbackCEC(tmdlHdmiCecEvent_t event, unsigned char *data, unsi
       if (event == TMDL_HDMICEC_CALLBACK_MESSAGE_AVAILABLE) {
 
          if (new_tail != this->driver.read_queue_head) {
-            frame->size    = length + 2;		/* */
-            frame->service = 1;
-            frame->addr    = data[0];			/* .AddressByte */
-            memcpy(frame->data, &data[1], length - 1);	/* .DataBytes[], length - sizeof(length,addr) */
+            frame->size    = length + 2;		/* sizeof(size) + sizeof(service) */
+            frame->service = CEC_RX_PKT;		/* this is an rx packet */
+            frame->addr    = data[0];			/* AddressByte */
+            memcpy(frame->data, &data[1], length - 1);	/* DataBytes[], length - sizeof(addr) */
 
             initiator = (frame->addr >> 4) & 0x0F;
             receiver  = frame->addr & 0x0F;
             opcode    = frame->data[0];
             LOG(KERN_INFO,"hdmicec:Rx:[%x--->%x] %s length:%d [%02x %02x %02x %02x]\n",
-               initiator,receiver,length ? cec_opcode(opcode) : "POLL",length, 
+               initiator,receiver,length > 1 ? cec_opcode(opcode) : "POLL",length, 
                frame->data[0], frame->data[1], frame->data[2], frame->data[3]);
 
             this->driver.read_queue_tail = new_tail;
@@ -772,10 +763,10 @@ static void eventCallbackCEC(tmdlHdmiCecEvent_t event, unsigned char *data, unsi
       } else if (event == TMDL_HDMICEC_CALLBACK_STATUS) {
 
          if (new_tail != this->driver.read_queue_head) {
-            frame->size    = length + 2;		/* */
-            frame->service = 2;
-            frame->addr    = data[0];			/* .AddressByte */
-            memcpy(frame->data, &data[1], length - 1);	/* .DataBytes[], length - sizeof(length,addr) */
+            frame->size    = length + 2;		/* sizeof(size) + sizeof(service) */
+            frame->service = CEC_ACK_PKT;		/* this is an ACK/NAK packet */
+            frame->addr    = data[0];			/* AddressByte */
+            memcpy(frame->data, &data[1], length - 1);	/* DataBytes[], length - sizeof(addr) */
 
             initiator = (frame->addr >> 4) & 0x0F;
             receiver  = frame->addr & 0x0F;
@@ -1180,18 +1171,15 @@ static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long 
 	       if (this->driver.raw_mode) {
                   this->driver.write_pending = 0;
                   this->driver.read_queue_head = this->driver.read_queue_tail;
-
-                  this->cec.rx_addr_mask = 0x8000;  /* force i2c output */   
-		  cec_listen_multi(this, 0, 0x7fff);
                } 
                else {
                   this->driver.write_pending = 1;
                   this->driver.read_queue_head = this->driver.read_queue_tail;
                   wake_up_interruptible(&this->driver.wait_read);
                   wake_up_interruptible(&this->driver.wait_write);
-
-		  cec_listen_single(this, this->cec.rx_addr);
 	       }
+
+               cec_listen_single(this, CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST);
             }
 	    break;
 	 }
@@ -2088,7 +2076,8 @@ static ssize_t this_cdev_write(struct file *pFile, const char *buffer, size_t le
    down(&this->driver.sem);
 
    if (!this->driver.write_pending) {
-      if ((frame->addr & 0xf0) != (CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST << 4) ) {
+      if (this->cec.rx_addr == CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST ||
+          (frame->addr & 0xf0) != (CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST << 4)) {
          TRY(tmdlHdmiCecSendMessage(this->cec.inst, (UInt8 *)&frame->addr, frame->size - 2));
          this->driver.write_pending = 1;
          bytes_written += length;
@@ -2159,13 +2148,13 @@ static int this_cdev_release(struct inode *pInode, struct file *pFile)
    if (--this->driver.user_counter == 0) {
       if (this->driver.raw_mode) {
          this->driver.raw_mode = 0;
-         this->driver.write_pending = 0;
+         this->driver.write_pending = 1;
          this->driver.read_queue_head = this->driver.read_queue_tail;
 
          wake_up_interruptible(&this->driver.wait_write);
          wake_up_interruptible(&this->driver.wait_read);
 
-         cec_listen_single(this, this->cec.rx_addr);
+         cec_listen_single(this, CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST);
       }
 
       pFile->private_data = NULL;
@@ -2410,7 +2399,6 @@ static int __init cec_init(void)
    /* 
       general device context
    */
-   //init_MUTEX(&this->driver.sem);
    sema_init(&this->driver.sem,1);
    this->driver.deinit_req=0;
    
