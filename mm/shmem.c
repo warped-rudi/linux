@@ -654,7 +654,7 @@ static void shmem_evict_inode(struct inode *inode)
 		kfree(xattr->name);
 		kfree(xattr);
 	}
-	BUG_ON(inode->i_blocks);
+	WARN_ON(inode->i_blocks);
 	shmem_free_inode(inode->i_sb);
 	clear_inode(inode);
 }
@@ -929,7 +929,8 @@ static struct page *shmem_swapin(swp_entry_t swap, gfp_t gfp,
 
 	/* Create a pseudo vma that just contains the policy */
 	pvma.vm_start = 0;
-	pvma.vm_pgoff = index;
+	/* Bias interleave by inode number to distribute better across nodes */
+	pvma.vm_pgoff = index + info->vfs_inode.i_ino;
 	pvma.vm_ops = NULL;
 	pvma.vm_policy = spol;
 	return swapin_readahead(swap, gfp, &pvma, 0);
@@ -942,7 +943,8 @@ static struct page *shmem_alloc_page(gfp_t gfp,
 
 	/* Create a pseudo vma that just contains the policy */
 	pvma.vm_start = 0;
-	pvma.vm_pgoff = index;
+	/* Bias interleave by inode number to distribute better across nodes */
+	pvma.vm_pgoff = index + info->vfs_inode.i_ino;
 	pvma.vm_ops = NULL;
 	pvma.vm_policy = mpol_shared_policy_lookup(&info->policy, index);
 
@@ -1154,8 +1156,20 @@ repeat:
 		if (!error) {
 			error = shmem_add_to_page_cache(page, mapping, index,
 						gfp, swp_to_radix_entry(swap));
-			/* We already confirmed swap, and make no allocation */
-			VM_BUG_ON(error);
+			/*
+			 * We already confirmed swap under page lock, and make
+			 * no memory allocation here, so usually no possibility
+			 * of error; but free_swap_and_cache() only trylocks a
+			 * page, so it is just possible that the entry has been
+			 * truncated or holepunched since swap was confirmed.
+			 * shmem_undo_range() will have done some of the
+			 * unaccounting, now delete_from_swap_cache() will do
+			 * the rest (including mem_cgroup_uncharge_swapcache).
+			 * Reset swap.val? No, leave it so "failed" goes back to
+			 * "repeat": reading a hole and writing should succeed.
+			 */
+			if (error)
+				delete_from_swap_cache(page);
 		}
 		if (error)
 			goto failed;
@@ -1877,7 +1891,7 @@ static int shmem_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 }
 
 static int shmem_create(struct inode *dir, struct dentry *dentry, umode_t mode,
-		struct nameidata *nd)
+		bool excl)
 {
 	return shmem_mknod(dir, dentry, mode | S_IFREG, 0);
 }
@@ -2364,11 +2378,13 @@ static struct dentry *shmem_fh_to_dentry(struct super_block *sb,
 {
 	struct inode *inode;
 	struct dentry *dentry = NULL;
-	u64 inum = fid->raw[2];
-	inum = (inum << 32) | fid->raw[1];
+	u64 inum;
 
 	if (fh_len < 3)
 		return NULL;
+
+	inum = fid->raw[2];
+	inum = (inum << 32) | fid->raw[1];
 
 	inode = ilookup5(sb, (unsigned long)(inum + fid->raw[0]),
 			shmem_match, fid->raw);

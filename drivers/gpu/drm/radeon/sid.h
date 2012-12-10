@@ -424,6 +424,7 @@
 #       define RDERR_INT_ENABLE                         (1 << 0)
 #       define GUI_IDLE_INT_ENABLE                      (1 << 19)
 
+#define	CP_STRMOUT_CNTL					0x84FC
 #define	SCRATCH_REG0					0x8500
 #define	SCRATCH_REG1					0x8504
 #define	SCRATCH_REG2					0x8508
@@ -698,6 +699,9 @@
 #define RLC_UCODE_ADDR                                    0xC32C
 #define RLC_UCODE_DATA                                    0xC330
 
+#define RLC_GPU_CLOCK_COUNT_LSB                           0xC338
+#define RLC_GPU_CLOCK_COUNT_MSB                           0xC33C
+#define RLC_CAPTURE_GPU_CLOCK_COUNT                       0xC340
 #define RLC_MC_CNTL                                       0xC344
 #define RLC_UCODE_CNTL                                    0xC348
 
@@ -901,5 +905,6 @@
 #define	PACKET3_WAIT_ON_DE_COUNTER_DIFF			0x88
 #define	PACKET3_SET_CE_DE_COUNTERS			0x89
 #define	PACKET3_WAIT_ON_AVAIL_BUFFER			0x8A
+#define	PACKET3_SWITCH_BUFFER				0x8B
 
 #endif

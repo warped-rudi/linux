@@ -975,12 +975,7 @@ struct em28xx_board em28xx_boards[] = {
 		.name         = "Terratec Cinergy HTC Stick",
 		.has_dvb      = 1,
 		.ir_codes     = RC_MAP_NEC_TERRATEC_CINERGY_XS,
-#if 0
-		.tuner_type   = TUNER_PHILIPS_TDA8290,
-		.tuner_addr   = 0x41,
-		.dvb_gpio     = terratec_h5_digital, /* FIXME: probably wrong */
-		.tuner_gpio   = terratec_h5_gpio,
-#endif
+		.tuner_type   = TUNER_ABSENT,
 		.i2c_speed    = EM2874_I2C_SECONDARY_BUS_SELECT |
 				EM28XX_I2C_CLK_WAIT_ENABLE |
 				EM28XX_I2C_FREQ_400_KHZ,
@@ -2880,12 +2875,20 @@ static void em28xx_card_setup(struct em28xx *dev)
 }
 
 
-#if defined(CONFIG_MODULES) && defined(MODULE)
 static void request_module_async(struct work_struct *work)
 {
 	struct em28xx *dev = container_of(work,
 			     struct em28xx, request_module_wk);
 
+	/*
+	 * The em28xx extensions can be modules or builtin. If the
+	 * modules are already loaded or are built in, those extensions
+	 * can be initialised right now. Otherwise, the module init
+	 * code will do it.
+	 */
+	em28xx_init_extension(dev);
+
+#if defined(CONFIG_MODULES) && defined(MODULE)
 	if (dev->has_audio_class)
 		request_module("snd-usb-audio");
 	else if (dev->has_alsa_audio)
@@ -2895,6 +2898,7 @@ static void request_module_async(struct work_struct *work)
 		request_module("em28xx-dvb");
 	if (dev->board.ir_codes && !disable_ir)
 		request_module("em28xx-rc");
+#endif /* CONFIG_MODULES */
 }
 
 static void request_modules(struct em28xx *dev)
@@ -2907,10 +2911,6 @@ static void flush_request_modules(struct em28xx *dev)
 {
 	flush_work_sync(&dev->request_module_wk);
 }
-#else
-#define request_modules(dev)
-#define flush_request_modules(dev)
-#endif /* CONFIG_MODULES */
 
 /*
  * em28xx_release_resources()
@@ -3328,13 +3328,6 @@ static int em28xx_usb_probe(struct usb_interface *interface,
 	   open the device before fully initializing it
 	 */
 	mutex_unlock(&dev->lock);
-
-	/*
-	 * These extensions can be modules. If the modules are already
-	 * loaded then we can initialise the device now, otherwise we
-	 * will initialise it when the modules load instead.
-	 */
-	em28xx_init_extension(dev);
 
 	return 0;
 

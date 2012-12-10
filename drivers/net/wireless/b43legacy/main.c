@@ -1508,7 +1508,7 @@ static void b43legacy_release_firmware(struct b43legacy_wldev *dev)
 
 static void b43legacy_print_fw_helptext(struct b43legacy_wl *wl)
 {
-	b43legacyerr(wl, "You must go to http://linuxwireless.org/en/users/"
+	b43legacyerr(wl, "You must go to http://wireless.kernel.org/en/users/"
 		     "Drivers/b43#devicefirmware "
 		     "and download the correct firmware (version 3).\n");
 }
@@ -3894,6 +3894,8 @@ static void b43legacy_remove(struct ssb_device *dev)
 	cancel_work_sync(&wl->firmware_load);
 
 	B43legacy_WARN_ON(!wl);
+	if (!wldev->fw.ucode)
+		return;			/* NULL if fw never loaded */
 	if (wl->current_dev == wldev)
 		ieee80211_unregister_hw(wl->hw);
 

@@ -166,6 +166,9 @@ static struct scsi_host_template isci_sht = {
 	.sg_tablesize			= SG_ALL,
 	.max_sectors			= SCSI_DEFAULT_MAX_SECTORS,
 	.use_clustering			= ENABLE_CLUSTERING,
+	.eh_abort_handler		= sas_eh_abort_handler,
+	.eh_device_reset_handler        = sas_eh_device_reset_handler,
+	.eh_bus_reset_handler           = sas_eh_bus_reset_handler,
 	.target_destroy			= sas_target_destroy,
 	.ioctl				= sas_ioctl,
 	.shost_attrs			= isci_host_attrs,
@@ -641,7 +644,6 @@ static int __devinit isci_pci_probe(struct pci_dev *pdev, const struct pci_devic
 						orom->hdr.version)) {
 			dev_warn(&pdev->dev,
 				 "[%d]: invalid oem parameters detected, falling back to firmware\n", i);
-			devm_kfree(&pdev->dev, orom);
 			orom = NULL;
 			break;
 		}

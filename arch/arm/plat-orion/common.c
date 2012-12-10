@@ -24,6 +24,33 @@
 #include <plat/ehci-orion.h>
 #include <mach/bridge-regs.h>
 
+/* Create a clkdev entry for a given device/clk */
+void __init orion_clkdev_add(const char *con_id, const char *dev_id,
+			     struct clk *clk)
+{
+	struct clk_lookup *cl;
+
+	cl = clkdev_alloc(clk, con_id, dev_id);
+	if (cl)
+		clkdev_add(cl);
+}
+
+/* Create clkdev entries for all orion platforms except kirkwood.
+   Kirkwood has gated clocks for some of its peripherals, so creates
+   its own clkdev entries. For all the other orion devices, create
+   clkdev entries to the tclk. */
+void __init orion_clkdev_init(struct clk *tclk)
+{
+	orion_clkdev_add(NULL, "orion_spi.0", tclk);
+	orion_clkdev_add(NULL, "orion_spi.1", tclk);
+	orion_clkdev_add(NULL, MV643XX_ETH_NAME ".0", tclk);
+	orion_clkdev_add(NULL, MV643XX_ETH_NAME ".1", tclk);
+	orion_clkdev_add(NULL, MV643XX_ETH_NAME ".2", tclk);
+	orion_clkdev_add(NULL, MV643XX_ETH_NAME ".3", tclk);
+	orion_clkdev_add(NULL, "orion_wdt", tclk);
+	orion_clkdev_add(NULL, MV64XXX_I2C_CTLR_NAME ".0", tclk);
+}
+
 /* Fill in the resources structure and link it into the platform
    device structure. There is always a memory region, and nearly
    always an interrupt.*/
@@ -283,10 +310,12 @@ static struct platform_device orion_ge00 = {
 void __init orion_ge00_init(struct mv643xx_eth_platform_data *eth_data,
 			    unsigned long mapbase,
 			    unsigned long irq,
-			    unsigned long irq_err)
+			    unsigned long irq_err,
+			    unsigned int tx_csum_limit)
 {
 	fill_resources(&orion_ge00_shared, orion_ge00_shared_resources,
 		       mapbase + 0x2000, SZ_16K - 1, irq_err);
+	orion_ge00_shared_data.tx_csum_limit = tx_csum_limit;
 	ge_complete(&orion_ge00_shared_data,
 		    orion_ge00_resources, irq, &orion_ge00_shared,
 		    eth_data, &orion_ge00);
@@ -335,10 +364,12 @@ static struct platform_device orion_ge01 = {
 void __init orion_ge01_init(struct mv643xx_eth_platform_data *eth_data,
 			    unsigned long mapbase,
 			    unsigned long irq,
-			    unsigned long irq_err)
+			    unsigned long irq_err,
+			    unsigned int tx_csum_limit)
 {
 	fill_resources(&orion_ge01_shared, orion_ge01_shared_resources,
 		       mapbase + 0x2000, SZ_16K - 1, irq_err);
+	orion_ge01_shared_data.tx_csum_limit = tx_csum_limit;
 	ge_complete(&orion_ge01_shared_data,
 		    orion_ge01_resources, irq, &orion_ge01_shared,
 		    eth_data, &orion_ge01);

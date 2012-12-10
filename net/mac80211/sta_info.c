@@ -169,9 +169,7 @@ void sta_info_free(struct ieee80211_local *local, struct sta_info *sta)
 	if (sta->rate_ctrl)
 		rate_control_free_sta(sta);
 
-#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	wiphy_debug(local->hw.wiphy, "Destroyed STA %pM\n", sta->sta.addr);
-#endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
+	sta_dbg(sta->sdata, "Destroyed STA %pM\n", sta->sta.addr);
 
 	kfree(sta);
 }
@@ -278,9 +276,7 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
 	for (i = 0; i < NUM_RX_DATA_QUEUES; i++)
 		sta->last_seq_ctrl[i] = cpu_to_le16(USHRT_MAX);
 
-#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	wiphy_debug(local->hw.wiphy, "Allocated STA %pM\n", sta->sta.addr);
-#endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
+	sta_dbg(sdata, "Allocated STA %pM\n", sta->sta.addr);
 
 #ifdef CONFIG_MAC80211_MESH
 	sta->plink_state = NL80211_PLINK_LISTEN;
@@ -333,9 +329,9 @@ static int sta_info_insert_drv_state(struct ieee80211_local *local,
 	}
 
 	if (sdata->vif.type == NL80211_IFTYPE_ADHOC) {
-		printk(KERN_DEBUG
-		       "%s: failed to move IBSS STA %pM to state %d (%d) - keeping it anyway.\n",
-		       sdata->name, sta->sta.addr, state + 1, err);
+		sdata_info(sdata,
+			   "failed to move IBSS STA %pM to state %d (%d) - keeping it anyway\n",
+			   sta->sta.addr, state + 1, err);
 		err = 0;
 	}
 
@@ -390,9 +386,7 @@ static int sta_info_insert_finish(struct sta_info *sta) __acquires(RCU)
 	sinfo.generation = local->sta_generation;
 	cfg80211_new_sta(sdata->dev, sta->sta.addr, &sinfo, GFP_KERNEL);
 
-#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	wiphy_debug(local->hw.wiphy, "Inserted STA %pM\n", sta->sta.addr);
-#endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
+	sta_dbg(sdata, "Inserted STA %pM\n", sta->sta.addr);
 
 	/* move reference to rcu-protected */
 	rcu_read_lock();
@@ -591,7 +585,7 @@ static bool sta_info_cleanup_expire_buffered_ac(struct ieee80211_local *local,
 		 */
 		if (!skb)
 			break;
-		dev_kfree_skb(skb);
+		ieee80211_free_txskb(&local->hw, skb);
 	}
 
 	/*
@@ -618,11 +612,9 @@ static bool sta_info_cleanup_expire_buffered_ac(struct ieee80211_local *local,
 			break;
 
 		local->total_ps_buffered--;
-#ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
-		printk(KERN_DEBUG "Buffered frame expired (STA %pM)\n",
+		ps_dbg(sta->sdata, "Buffered frame expired (STA %pM)\n",
 		       sta->sta.addr);
-#endif
-		dev_kfree_skb(skb);
+		ieee80211_free_txskb(&local->hw, skb);
 	}
 
 	/*
@@ -738,8 +730,8 @@ int __must_check __sta_info_destroy(struct sta_info *sta)
 
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
 		local->total_ps_buffered -= skb_queue_len(&sta->ps_tx_buf[ac]);
-		__skb_queue_purge(&sta->ps_tx_buf[ac]);
-		__skb_queue_purge(&sta->tx_filtered[ac]);
+		ieee80211_purge_tx_queue(&local->hw, &sta->ps_tx_buf[ac]);
+		ieee80211_purge_tx_queue(&local->hw, &sta->tx_filtered[ac]);
 	}
 
 #ifdef CONFIG_MAC80211_MESH
@@ -747,9 +739,8 @@ int __must_check __sta_info_destroy(struct sta_info *sta)
 		mesh_accept_plinks_update(sdata);
 #endif
 
-#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	wiphy_debug(local->hw.wiphy, "Removed STA %pM\n", sta->sta.addr);
-#endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
+	sta_dbg(sdata, "Removed STA %pM\n", sta->sta.addr);
+
 	cancel_work_sync(&sta->drv_unblock_wk);
 
 	cfg80211_del_sta(sdata->dev, sta->sta.addr, GFP_KERNEL);
@@ -774,7 +765,7 @@ int __must_check __sta_info_destroy(struct sta_info *sta)
 		tid_tx = rcu_dereference_raw(sta->ampdu_mlme.tid_tx[i]);
 		if (!tid_tx)
 			continue;
-		__skb_queue_purge(&tid_tx->pending);
+		ieee80211_purge_tx_queue(&local->hw, &tid_tx->pending);
 		kfree(tid_tx);
 	}
 
@@ -889,10 +880,8 @@ void ieee80211_sta_expire(struct ieee80211_sub_if_data *sdata,
 			continue;
 
 		if (time_after(jiffies, sta->last_rx + exp_time)) {
-#ifdef CONFIG_MAC80211_IBSS_DEBUG
-			printk(KERN_DEBUG "%s: expiring inactive STA %pM\n",
-			       sdata->name, sta->sta.addr);
-#endif
+			ibss_dbg(sdata, "expiring inactive STA %pM\n",
+				 sta->sta.addr);
 			WARN_ON(__sta_info_destroy(sta));
 		}
 	}
@@ -959,6 +948,7 @@ void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta)
 	struct ieee80211_local *local = sdata->local;
 	struct sk_buff_head pending;
 	int filtered = 0, buffered = 0, ac;
+	unsigned long flags;
 
 	clear_sta_flag(sta, WLAN_STA_SP);
 
@@ -974,12 +964,16 @@ void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta)
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
 		int count = skb_queue_len(&pending), tmp;
 
+		spin_lock_irqsave(&sta->tx_filtered[ac].lock, flags);
 		skb_queue_splice_tail_init(&sta->tx_filtered[ac], &pending);
+		spin_unlock_irqrestore(&sta->tx_filtered[ac].lock, flags);
 		tmp = skb_queue_len(&pending);
 		filtered += tmp - count;
 		count = tmp;
 
+		spin_lock_irqsave(&sta->ps_tx_buf[ac].lock, flags);
 		skb_queue_splice_tail_init(&sta->ps_tx_buf[ac], &pending);
+		spin_unlock_irqrestore(&sta->ps_tx_buf[ac].lock, flags);
 		tmp = skb_queue_len(&pending);
 		buffered += tmp - count;
 	}
@@ -990,11 +984,9 @@ void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta)
 
 	sta_info_recalc_tim(sta);
 
-#ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
-	printk(KERN_DEBUG "%s: STA %pM aid %d sending %d filtered/%d PS frames "
-	       "since STA not sleeping anymore\n", sdata->name,
+	ps_dbg(sdata,
+	       "STA %pM aid %d sending %d filtered/%d PS frames since STA not sleeping anymore\n",
 	       sta->sta.addr, sta->sta.aid, filtered, buffered);
-#endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
 }
 
 static void ieee80211_send_null_response(struct ieee80211_sub_if_data *sdata,
@@ -1384,10 +1376,8 @@ int sta_info_move_state(struct sta_info *sta,
 		return -EINVAL;
 	}
 
-#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: moving STA %pM to state %d\n",
-		sta->sdata->name, sta->sta.addr, new_state);
-#endif
+	sta_dbg(sta->sdata, "moving STA %pM to state %d\n",
+		sta->sta.addr, new_state);
 
 	/*
 	 * notify the driver before the actual changes so it can
