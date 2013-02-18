@@ -84,3 +84,11 @@ GTAGS
 *.orig
 *~
 \#*#
+
+# Rudi
+?make
+?disk
+?clean
+?newconf
+?updconf
+
