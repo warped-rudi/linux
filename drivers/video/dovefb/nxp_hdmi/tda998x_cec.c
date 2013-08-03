@@ -469,7 +469,6 @@ static void cec_on(cec_instance *this)
    __gpio_set_value(TDA_IRQ_CALIB,0);
    for (err = 0; err < 10; err++)
 	udelay(1000);
-   mdelay(10);
    __gpio_set_value(TDA_IRQ_CALIB,1);
    spin_unlock_irq(&tsk->sighand->siglock);
 
