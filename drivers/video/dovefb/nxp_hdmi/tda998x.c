@@ -34,14 +34,14 @@
 //#include <mach/display.h>
 
 /* HDMI DevLib */
-#include "tmNxCompId.h"
-#include "tmdlHdmiTx_Types.h"
-#include "tmdlHdmiTx_Functions.h"
+#include "tmdlHdmiTx.h"
 
 /* local */
 #include "tda998x_version.h"
 #include "tda998x.h"
+#include "tda998x_i2c.h"
 #include "tda998x_ioctl.h"
+#include "tda998x_exports.h"
 
 #ifdef I2C_DBG
 #include "tmbslHdmiTx_types.h"
@@ -68,10 +68,12 @@
  *  Global
  */
 
-tda_instance our_instance;
+static tda_instance our_instance;
 static struct cdev our_cdev, *this_cdev=&our_cdev;
 static int initialized = 0;
 static int saved_mode = -1;
+static cec_callback_t cec_callback = NULL;
+
 #ifdef ANDROID_DSS
 static struct omap_video_timings video_640x480at60Hz_panel_timings = {
    .x_res          = 640,
@@ -202,16 +204,15 @@ MODULE_PARM_DESC(major, "The major number of the device mapper");
 /* 
  *  Get main and unique I2C Client driver handle
  */
-struct i2c_client *GetThisI2cClient(void)
+struct i2c_client *txGetThisI2cClient(void)
 {
-   tda_instance *this=&our_instance;
-   return this->driver.i2c_client;
+   return our_instance.driver.i2c_client;
 }
 
 /*
  * error handling
  */
-char *hdmi_tx_err_string(int err)
+static char *hdmi_tx_err_string(int err)
 {
    switch (err & 0x0FFF)
       {
@@ -559,8 +560,8 @@ static char *tda_ioctl(int io)
  */
 static int tda_spy(int verbose)
 {
-   tda_instance *this=&our_instance;
-   int i,err=0;
+   tda_instance *this = &our_instance;
+   int i,err = 0;
 
    if (!verbose) {
       return err;
@@ -703,11 +704,22 @@ static int tda_spy(int verbose)
  */
 
 /*
+ * Check, if video output can be activated
+ */
+static int is_ready_for_output(tda_instance *this)
+{
+   return (this->tda.rx_device_active) &&                               /* check RxSens */
+          (this->tda.power == tmPowerOn) &&                             /* check CEC didn't switch it off */
+          (this->tda.src_address != NO_PHY_ADDR) &&                     /* check EDID has been received */
+          (this->tda.hot_plug_detect == TMDL_HDMITX_HOTPLUG_ACTIVE);    /* should be useless, but legacy... */
+}
+
+/*
  * On HDCP
  */
-void hdcp_on(tda_instance *this) {
-
-   int err=0;
+void hdcp_on(tda_instance *this)
+{
+   int err = 0;
 
    if (this->tda.hdcp_status != HDCP_IS_NOT_INSTALLED) { /* check HDCP is installed ... */
          if (this->tda.hdcp_enable) { /* ... but requested ! */ 
@@ -728,9 +740,9 @@ void hdcp_on(tda_instance *this) {
 /*
  * Off HDCP
  */
-void hdcp_off(tda_instance *this) {
-
-   int err=0;
+void hdcp_off(tda_instance *this)
+{
+   int err = 0;
 
    if (this->tda.hdcp_status != HDCP_IS_NOT_INSTALLED) { /* check HDCP is installed ... */
 
@@ -745,28 +757,23 @@ void hdcp_off(tda_instance *this) {
 /*
  * Run video
  */
-void show_video(tda_instance *this) {
+void show_video(tda_instance *this)
+{
+   int err = 0;
 
-   int err=0;
+   if (is_ready_for_output(this)) {
 
-   if (this->tda.rx_device_active) { /* check RxSens */
-      if (this->tda.hot_plug_detect == TMDL_HDMITX_HOTPLUG_ACTIVE) { /* should be useless, but legacy... */
-         if (this->tda.power == tmPowerOn) { /* check CEC or DSS didn't switch it off */
-            if (this->tda.src_address != 0xFFFF) { /* check EDID has been received */
-				hdcp_off(this);
-               TRY(tmdlHdmiTxSetInputOutput(this->tda.instance,         \
-                                            this->tda.setio.video_in,   \
-                                            this->tda.setio.video_out,  \
-                                            this->tda.setio.audio_in,   \
-                                            this->tda.setio.sink));
-               hdcp_on(this);
-               /*
-                 Mind that SetInputOutput disable the blue color matrix settings of tmdlHdmiTxSetBScreen ...
-                 so put tmdlHdmiTxSetBScreen (or hdcp_on) always after
-               */
-            }
-         }
-      }
+      hdcp_off(this);
+      TRY(tmdlHdmiTxSetInputOutput(this->tda.instance,         \
+                                   this->tda.setio.video_in,   \
+                                   this->tda.setio.video_out,  \
+                                   this->tda.setio.audio_in,   \
+                                   this->tda.setio.sink));
+      hdcp_on(this);
+      /*
+         Mind that SetInputOutput disable the blue color matrix settings of tmdlHdmiTxSetBScreen ...
+         so put tmdlHdmiTxSetBScreen (or hdcp_on) always after
+      */
    }
 
  TRY_DONE:
@@ -778,17 +785,22 @@ void show_video(tda_instance *this) {
  */
 static void interrupt_polling(struct work_struct *dummy)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   tmdlHdmiTxEvent_t prevEvent;
+   int err = 0, loopCnt=0;
 
-   /* Tx part */
-   TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
+   do {
+      prevEvent = this->tda.event;
 
-   /* CEC part */
-   if (this->driver.cec_callback) this->driver.cec_callback(dummy);
+      /* Tx part */
+      TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
 
-   /* FIX : IT anti debounce */
-   TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
+      /* CEC part */
+      if (this->driver.cec_callback)
+         this->driver.cec_callback(dummy);
+
+   } while (this->tda.event != prevEvent && ++loopCnt < 4 );
+   
 
  TRY_DONE:
 
@@ -805,8 +817,8 @@ static void interrupt_polling(struct work_struct *dummy)
  */
 static void hdcp_check(struct work_struct *dummy)
 {
-   int err=0;
-   tda_instance *this=&our_instance;
+   int err = 0;
+   tda_instance *this = &our_instance;
    tmdlHdmiTxHdcpCheck_t hdcp_status;
 
    down(&this->driver.sem);
@@ -827,15 +839,9 @@ static void hdcp_check(struct work_struct *dummy)
       test=0;
       this->tda.hdcp_enable=1-this->tda.hdcp_enable;
       printk("TEST hdcp:%d\n",this->tda.hdcp_enable);
-      if (this->tda.rx_device_active) { /* check RxSens */
-         if (this->tda.hot_plug_detect == TMDL_HDMITX_HOTPLUG_ACTIVE) { /* should be useless, but legacy... */
-            if (this->tda.power == tmPowerOn) { /* check CEC didn't switch it off */
-               if (this->tda.src_address != 0xFFFF) { /* check EDID has been received */
-                  hdcp_off(this);
-                  hdcp_on(this);				  
-               }
-            }
-         }
+      if (is_ready_for_output(this)) {
+         hdcp_off(this);
+         hdcp_on(this);
       }
    }
 #endif
@@ -850,16 +856,20 @@ static void hdcp_check(struct work_struct *dummy)
 
 void register_cec_interrupt(cec_callback_t fct)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
-   this->driver.cec_callback = fct;
+   if (initialized) 
+	this->driver.cec_callback = fct;
+   else
+	cec_callback = fct;
 }
 EXPORT_SYMBOL(register_cec_interrupt);
 
 void unregister_cec_interrupt(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
+   cec_callback = NULL;
    this->driver.cec_callback = NULL;
 }
 EXPORT_SYMBOL(unregister_cec_interrupt);
@@ -897,8 +907,8 @@ static irqreturn_t tda_irq(int irq, void *_udc)
  */
 static void eventCallbackTx(tmdlHdmiTxEvent_t event)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
    unsigned short new_addr;
 #if defined (TMFL_TDA19989) || defined (TMFL_TDA9984) 
    tda_hdcp_fail hdcp_fail;
@@ -906,7 +916,7 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
 
    this->tda.event=event;
    if (TMDL_HDMITX_HDCP_INACTIVE != event) {
-      printk(KERN_INFO "hdmi %s\n",tda_spy_event(event));
+      printk(KERN_INFO "hdmitx %s\n",tda_spy_event(event));
    }
 
    switch (event) {
@@ -914,10 +924,13 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
       TRY(tmdlHdmiTxGetEdidSourceAddress(this->tda.instance,        \
                                          &new_addr));
       LOG(KERN_INFO,"phy.@:%x\n",new_addr);
-      /*       if (this->tda.src_address == new_addr) { */
-      /*          break; */
-      /*       } */
+
+      if (new_addr == this->tda.src_address)
+         break;
+
       this->tda.src_address = new_addr;
+      this->tda.src_address_prev = NO_PHY_ADDR;
+
 #if defined (TMFL_TDA19989) || defined (TMFL_TDA9984) 
       tda_spy(this->param.verbose>=1);
 #endif
@@ -950,11 +963,14 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
       break;
    case TMDL_HDMITX_HPD_ACTIVE: /* HDMI is so funny u can get RxSens without being plugged !!! */
       this->tda.hot_plug_detect = TMDL_HDMITX_HOTPLUG_ACTIVE;
-      show_video(this);
+      this->tda.src_address = this->tda.src_address_prev;
+      this->tda.src_address_prev = NO_PHY_ADDR;
       break;
    case TMDL_HDMITX_HPD_INACTIVE: /* unplug */
       this->tda.hot_plug_detect = TMDL_HDMITX_HOTPLUG_INACTIVE;
-      this->tda.src_address = 0xFFFF;
+      if (this->tda.rx_device_active)
+         this->tda.src_address_prev = this->tda.src_address;
+      this->tda.src_address = NO_PHY_ADDR;
       break;
 #if defined (TMFL_TDA19989) || defined (TMFL_TDA9984) 
    case TMDL_HDMITX_HDCP_INACTIVE: /* HDCP drops off */
@@ -979,11 +995,9 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
       break;
    }
 
+ TRY_DONE:
    this->driver.poll_done=true;
    wake_up_interruptible(&this->driver.wait);
-   
- TRY_DONE:
-   (void)0;
 }
 
 /*
@@ -991,7 +1005,7 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
  */
 static int hdmi_tx_init(tda_instance *this)
 {
-   int err=0;
+   int err = 0;
 
    LOG(KERN_INFO,"called\n");
 
@@ -1067,25 +1081,29 @@ static int hdmi_tx_init(tda_instance *this)
    this->tda.setio.audio_in.channelStatus.wordLength = TMDL_HDMITX_CSWORD_DEFAULT;
    this->tda.setio.audio_in.channelStatus.origSampleFreq = TMDL_HDMITX_CSOFREQ_44_1k;
 #else
-   this->tda.setio.audio_in.format = TMDL_HDMITX_AFMT_SPDIF;
-   this->tda.setio.audio_in.dstRate = TMDL_HDMITX_DSTRATE_DOUBLE;//TMDL_HDMITX_DSTRATE_SINGLE; /* not relevant here */
-   this->tda.setio.audio_in.channelAllocation = 0; /* audio channel allocation (Ref to CEA-861D p85) */
    this->tda.setio.audio_in.rate = TMDL_HDMITX_AFS_44K;
+   this->tda.setio.audio_in.format = TMDL_HDMITX_AFMT_SPDIF;
+
+   this->tda.setio.audio_in.dstRate = TMDL_HDMITX_DSTRATE_SINGLE; /* not relevant here */
+   this->tda.setio.audio_in.channelAllocation = 0; /* audio channel allocation (Ref to CEA-861D p85) */
+   
+// Rudi - defaults for I2S mode, probaly not needed for SPDIF
+   this->tda.setio.audio_in.i2sQualifier = TMDL_HDMITX_I2SQ_32BITS;
    this->tda.setio.audio_in.channelStatus.PcmIdentification = TMDL_HDMITX_AUDIO_DATA_PCM;
    this->tda.setio.audio_in.channelStatus.CopyrightInfo = TMDL_HDMITX_CSCOPYRIGHT_UNPROTECTED;
    this->tda.setio.audio_in.channelStatus.FormatInfo = TMDL_HDMITX_CSFI_PCM_2CHAN_NO_PRE;
-   this->tda.setio.audio_in.channelStatus.categoryCode = 0;
+   this->tda.setio.audio_in.channelStatus.categoryCode = 0x82;
    this->tda.setio.audio_in.channelStatus.clockAccuracy = TMDL_HDMITX_CSCLK_LEVEL_II;
    this->tda.setio.audio_in.channelStatus.maxWordLength = TMDL_HDMITX_CSMAX_LENGTH_24;
    this->tda.setio.audio_in.channelStatus.wordLength = TMDL_HDMITX_CSWORD_DEFAULT;
    this->tda.setio.audio_in.channelStatus.origSampleFreq = TMDL_HDMITX_CSOFREQ_44_1k;
-   this->tda.setio.audio_in.i2sQualifier = TMDL_HDMITX_I2SQ_32BITS;
 #endif
 
 // Rabeeh - D2 uses below?? --> This is original   this->tda.setio.sink = TMDL_HDMITX_SINK_HDMI; /* skip edid reading */
    this->tda.setio.sink = TMDL_HDMITX_SINK_EDID; /* Don't skip edid reading */
    /*    this->tda.src_address = 0x1000; /\* debug *\/ */
    this->tda.src_address = NO_PHY_ADDR; /* it's unref */
+   this->tda.src_address_prev = NO_PHY_ADDR;
    initialized = 1;
  TRY_DONE:
    return err;
@@ -1093,8 +1111,8 @@ static int hdmi_tx_init(tda_instance *this)
 
 void reset_hdmi(int hdcp_module)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
 
    down(&this->driver.sem);
 
@@ -1139,9 +1157,9 @@ EXPORT_SYMBOL(reset_hdmi);
 /*
  *  
  */
-short edid_phy_addr(void)
+unsigned short edid_phy_addr(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
    return this->tda.src_address;
 }
@@ -1152,7 +1170,7 @@ EXPORT_SYMBOL(edid_phy_addr);
  */
 tda_power get_hdmi_status(void)
 { 
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    
    return this->tda.power;
 }
@@ -1163,7 +1181,7 @@ EXPORT_SYMBOL(get_hdmi_status);
  */
 tda_power get_hpd_status(void)
 { 
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    
    return (this->tda.hot_plug_detect == TMDL_HDMITX_HOTPLUG_ACTIVE);
 }
@@ -1174,7 +1192,7 @@ EXPORT_SYMBOL(get_hpd_status);
  */
 int edid_received(void)
 { 
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    
    return (this->tda.event == TMDL_HDMITX_EDID_RECEIVED);
 }
@@ -1185,8 +1203,8 @@ EXPORT_SYMBOL(edid_received);
  */
 int hdmi_enable(void)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
 
    LOG(KERN_INFO,"called\n");
 
@@ -1216,8 +1234,8 @@ EXPORT_SYMBOL(hdmi_enable);
  */
 int hdmi_disable(int event_tracking)
 { 
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
    
    LOG(KERN_INFO,"called\n");
 
@@ -1248,7 +1266,7 @@ EXPORT_SYMBOL(hdmi_disable);
  */
 static int hdmi_panel_probe(struct omap_dss_device *dssdev)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
    LOG(KERN_INFO," called\n");
 
@@ -1395,7 +1413,7 @@ static int this_cdev_open(struct inode *pInode, struct file *pFile)
 static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long arg)
 {
    tda_instance* this = pFile->private_data;
-   int err=0;
+   int err = 0;
 
    LOG(KERN_INFO,":%s\n",tda_ioctl(_IOC_NR(cmd)));
 
@@ -1405,9 +1423,10 @@ static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long 
    }
 
    if (_IOC_DIR(cmd) & _IOC_READ) 
-      err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd)) || !arg;
+      err = !arg || !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
    else if (_IOC_DIR(cmd) & _IOC_WRITE)
-      err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd)) || !arg;
+      err = !arg || !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+   
    if (err) {
       printk(KERN_ERR "hdmitx:%s:argument access denied (check address vs value)\n",__func__);
       printk(KERN_ERR "_IOC_DIR:%d arg:%lx\n",_IOC_DIR(cmd),arg);
@@ -1804,8 +1823,8 @@ static int this_cdev_release(struct inode *pInode, struct file *pFile)
  */
 static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
 
    LOG(KERN_INFO,"called\n");
 
@@ -1899,30 +1918,37 @@ static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id 
 
 /* CuBox specific stuff */
 /* Addions to get EDID stuff out of the transmitter driver */
-char *tda19988_get_edid(int *num_of_blocks)
+const char *tda19988_get_edid(int *num_of_blocks)
 {
-	tda_instance* this = &our_instance;
-	if (!initialized) return NULL;
-	tmdlHdmiTxGetEdidStatus(this->tda.instance, &this->tda.edid.status, &this->tda.edid.block_count);
-	if (this->tda.edid.status) return NULL;
-	tmdlHdmiTxGetEdidMonitorDescriptors(this->tda.instance, \
-                                            this->tda.edid_md.desc1, \
-                                            this->tda.edid_md.desc2, \
-                                            this->tda.edid_md.other, \
-                                            this->tda.edid_md.max, \
-                                            &this->tda.edid_md.written);
-	*num_of_blocks = this->tda.edid.block_count;
-	return  this->tda.raw_edid;
+   tda_instance* this = &our_instance;
+
+   if (!initialized)
+      return NULL;
+
+   tmdlHdmiTxGetEdidStatus(this->tda.instance, 
+                           &this->tda.edid.status, 
+                           &this->tda.edid.block_count);
+   if (this->tda.edid.status) 
+      return NULL;
+
+   tmdlHdmiTxGetEdidMonitorDescriptors(this->tda.instance, \
+                                       this->tda.edid_md.desc1, \
+                                       this->tda.edid_md.desc2, \
+                                       this->tda.edid_md.other, \
+                                       this->tda.edid_md.max, \
+                                       &this->tda.edid_md.written);
+   *num_of_blocks = this->tda.edid.block_count;
+   
+   return this->tda.raw_edid;
 }
 
-struct res_to_vmode {
+static struct {
 	int x;
 	int y;
 	int interlaced;
 	int hz;
 	int vmode;
-};
-struct res_to_vmode resolution_to_video_format[] = {
+} resolution_to_video_format[] = {
 {640,	480,	0,	60,	TMDL_HDMITX_VFMT_01_640x480p_60Hz},
 {720,	480,	0,	60,	TMDL_HDMITX_VFMT_02_720x480p_60Hz},
 {720,	480,	0,	60,	TMDL_HDMITX_VFMT_03_720x480p_60Hz},
@@ -1994,50 +2020,103 @@ struct res_to_vmode resolution_to_video_format[] = {
 {1024,	768,	1,	87,	TMDL_HDMITX_VFMT_PC_1024x768i_87Hz},
 };
 
-int configure_tx_inout(int x, int y, int interlaced, int hz)
+int tda19988_configure_tx_inout(int x, int y, int interlaced, int hz)
 {
-	int i, mode = -1, refresh = 0;
-	tda_instance* this = &our_instance;
+   tda_instance* this = &our_instance;
+   int i, d, mode = -1, rateDiff = INT_MAX;
 
-	for (i = 0 ; i < sizeof(resolution_to_video_format); i++) {
-		if (	(x == resolution_to_video_format[i].x) &&
-			(y == resolution_to_video_format[i].y) &&
-			(interlaced == resolution_to_video_format[i].interlaced) &&
-			(hz == resolution_to_video_format[i].hz)) {
-			mode = resolution_to_video_format[i].vmode;
-			printk (KERN_INFO "HDMI TX - FOUND exact resolution %d\n",mode);
-			break;
-		}
-	}
+   for (i = 0; rateDiff && i < ARRAY_SIZE(resolution_to_video_format); i++) {
+      
+      if ((x == resolution_to_video_format[i].x) &&
+          (y == resolution_to_video_format[i].y) &&
+          (interlaced == resolution_to_video_format[i].interlaced) ) {
+         
+         d = abs(resolution_to_video_format[i].hz - hz);
+         if (d < rateDiff) {
+            rateDiff = d;
+            mode = resolution_to_video_format[i].vmode;
+         }
+      }
+   }
 
-	if (mode < 0) {
-		/* Try finding resolution but with closest refresh rate */
-		for (i = 0 ; i < sizeof(resolution_to_video_format); i++) {
-			if (	(x == resolution_to_video_format[i].x) &&
-				(y == resolution_to_video_format[i].y) &&
-				(interlaced == resolution_to_video_format[i].interlaced)) {
-				if ((resolution_to_video_format[i].hz - refresh) > 
-				    (resolution_to_video_format[i].hz - hz)) {
-					mode = resolution_to_video_format[i].vmode;
-					printk (KERN_INFO "HDMI TX - Found good candidate %d (requested %dhz, found %dhz)\n",mode,hz,resolution_to_video_format[i].hz);
-					refresh = resolution_to_video_format[i].hz;
-				}
-			}
-		}
-	}
+   if (mode < 0) {
+      printk (KERN_ERR "HDMI TX - no matching resolution %dx%d%c %dHz\n",x,y,interlaced ? 'i':'p',hz);
+      return 0;
+   }
 
-	if (mode < 0)
-		return 0;
+   if (rateDiff == 0)
+      printk (KERN_INFO "HDMI TX - FOUND exact resolution %d\n",mode);
+   else
+      printk (KERN_INFO "HDMI TX - Found good candidate %d (requested %dhz, found %dhz)\n",
+              mode,hz,resolution_to_video_format[mode].hz);
 
-	if (initialized) {
-		this->tda.setio.video_in.format = mode;
-		this->tda.setio.video_out.format = mode;
-		show_video(this);
-	} else {
-		saved_mode = mode;
-	}
+   if (initialized) {
+      down(&this->driver.sem);
 
-	return 1;
+      if (this->tda.setio.video_in.format != mode) {
+
+         this->tda.setio.video_in.format = mode;
+         this->tda.setio.video_out.format = mode;
+         show_video(this);
+      }
+      
+      up(&this->driver.sem);
+   } else {
+      saved_mode = mode;
+   }
+
+   return 1;
+}
+
+void tda19988_set_audio_rate(unsigned rate)
+{
+   static struct { unsigned rate; tmdlHdmiTxAudioRate_t code; } rateMap[] = {
+      {  32000,  TMDL_HDMITX_AFS_32K },
+      {  44100,  TMDL_HDMITX_AFS_44K }, 
+      {  48000,  TMDL_HDMITX_AFS_48K },
+      {  88200,  TMDL_HDMITX_AFS_88K },
+      {  96000,  TMDL_HDMITX_AFS_96K },
+      { 176400, TMDL_HDMITX_AFS_176K },
+      { 192000, TMDL_HDMITX_AFS_192K }
+   };
+
+   tda_instance *this = &our_instance;
+   unsigned i, temp, rateDiff = INT_MAX, err = 0;
+   tmdlHdmiTxAudioRate_t rateCode = this->tda.setio.audio_in.rate;
+
+   if(!initialized)
+      return;
+
+   for (i = 0; rateDiff && i < ARRAY_SIZE(rateMap); i++) {
+      temp = abs(rateMap[i].rate - rate);
+      if( temp < rateDiff) {
+         rateCode = rateMap[i].code;
+         rateDiff = temp;
+      }
+   }
+
+#if 0
+   printk(KERN_INFO "HDMI TX - setting audio rate to %d (%d -> %d)\n", 
+          rate, this->tda.setio.audio_in.rate, rateCode);
+#endif
+
+   down(&this->driver.sem);
+
+   if (is_ready_for_output(this) && this->tda.setio.audio_in.rate != rateCode) {
+
+      TRY(tmdlHdmiTxSetAudioMute(this->tda.instance, true));
+
+      this->tda.setio.audio_in.rate = rateCode;
+      TRY(tmdlHdmiTxSetAudioInput(this->tda.instance, \
+                                 this->tda.setio.audio_in, \
+                                 this->tda.setio.sink));
+TRY_DONE:
+      tmdlHdmiTxSetAudioMute(this->tda.instance, this->tda.audio_mute);
+   } else {
+      this->tda.setio.audio_in.rate = rateCode;
+   }
+      
+   up(&this->driver.sem);
 }
 
 
@@ -2046,8 +2125,8 @@ int configure_tx_inout(int x, int y, int interlaced, int hz)
  */
 static int this_i2c_remove(struct i2c_client *client)
 {
-   tda_instance *this=&our_instance;
-   int err=0;
+   tda_instance *this = &our_instance;
+   int err = 0;
 
    LOG(KERN_INFO,"called\n");
 
@@ -2108,7 +2187,7 @@ static struct file_operations this_cdev_fops = {
 
 static ssize_t reso_show(struct device *dev,struct device_attribute *attr, char *buf)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
    return sprintf(buf,"format video %d ( %s )\n", \
                   this->tda.setio.video_in.format,                  \
@@ -2118,7 +2197,7 @@ static ssize_t reso_show(struct device *dev,struct device_attribute *attr, char 
 static ssize_t reso_store(struct device *dev,
                           struct device_attribute *attr, const char *buf, size_t size)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    int resolution=0;
 
    sscanf(buf,"%d",&resolution);
@@ -2147,7 +2226,7 @@ static ssize_t reso_store(struct device *dev,
 
 static ssize_t audio_show(struct device *dev,struct device_attribute *attr, char *buf)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    printk("Audio Show\n");
 
    tda_spy_audio(&this->tda.setio.audio_in);
@@ -2163,7 +2242,7 @@ static ssize_t audio_show(struct device *dev,struct device_attribute *attr, char
 static ssize_t audio_store(struct device *dev,
                            struct device_attribute *attr, const char *buf, size_t size)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    char desc_format[]="%d - %d - %d - %d - %d - %d\n";
    tda_audio_in audio;
    
@@ -2208,7 +2287,7 @@ static ssize_t i2cR_store(struct device *dev,
       adb shell "echo '2 1' >/sys/hdmitx/i2cR"
       ... read page 0x02 address 0x01
    */
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    tmHdmiTxobject_t *p;
    tmErrorCode_t err;
    unsigned int address;
@@ -2230,7 +2309,7 @@ static ssize_t i2cW_store(struct device *dev,
      ... write 0x02 page 0x02 address 0x01 using mask 0x03
    */
 
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    tmHdmiTxobject_t *p;
    tmErrorCode_t err;
    unsigned int page,address,mask,value;
@@ -2262,7 +2341,7 @@ static struct device_attribute *display_sysfs_attrs[] = {
 
 static int comm_init(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    int retval=0;
    int i=0;	
    struct device_attribute *attr;
@@ -2290,7 +2369,7 @@ static int comm_init(void)
 
 static void comm_exit(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    int i=0;	
    struct device_attribute *attr;
    while ((attr = display_sysfs_attrs[i++]) != NULL) {
@@ -2304,9 +2383,9 @@ static void comm_exit(void)
  */
 static int __init tx_init(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
    dev_t dev=0;
-   int err=0;
+   int err = 0;
 
    /* 
       general device context
@@ -2390,7 +2469,6 @@ static int __init tx_init(void)
    /* 
       general device context
    */
-//   init_MUTEX(&this->driver.sem);
    sema_init(&this->driver.sem,1);
    
    /*
@@ -2414,9 +2492,14 @@ static int __init tx_init(void)
 
    /* set video mode */
    if (saved_mode >= 0) {
-	this->tda.setio.video_in.format = saved_mode;
-	this->tda.setio.video_out.format = saved_mode;
-	show_video(this);
+      this->tda.setio.video_in.format = saved_mode;
+	  this->tda.setio.video_out.format = saved_mode;
+	  show_video(this);
+   }
+
+   /* enable cec callback */
+   if (cec_callback) {
+	  this->driver.cec_callback = cec_callback;
    }
 
    return 0;
@@ -2431,7 +2514,7 @@ static int __init tx_init(void)
  */
 static void __exit tx_exit(void)
 {
-   tda_instance *this=&our_instance;
+   tda_instance *this = &our_instance;
 
    LOG(KERN_INFO,"called\n");
 
@@ -2475,3 +2558,4 @@ module_exit(tx_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andre Lepine <andre.lepine@nxp.com>");
 MODULE_DESCRIPTION(HDMITX_NAME " driver");
+
