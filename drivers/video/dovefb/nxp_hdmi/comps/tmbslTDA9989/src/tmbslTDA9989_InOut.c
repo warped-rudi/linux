@@ -3391,7 +3391,7 @@ tmbslTDA9989MatrixSetConversion
     
             if(vinMode == HDMITX_VINMODE_RGB444)    /* RGB */
             {
-                cspace_in = HDMITX_CS_RGB_LIMITED;
+                cspace_in = HDMITX_CS_RGB_FULL;
             }
             else                                    /* CCIR656, YUV444, YU422 */
             {
@@ -3401,7 +3401,7 @@ tmbslTDA9989MatrixSetConversion
         default:    /* Now all the SD modes */
             if(vinMode == HDMITX_VINMODE_RGB444)    /* we're RGB */
             {
-                cspace_in = HDMITX_CS_RGB_LIMITED;
+                cspace_in = HDMITX_CS_RGB_FULL;
             }
             else                                    /* CCIR656, YUV444, YU422 */
             {
