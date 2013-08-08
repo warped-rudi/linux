@@ -324,7 +324,7 @@ static int dovefb_ovly_ioctl(struct fb_info *fi, unsigned int cmd,
 {
 	void __user *argp = (void __user *)arg;
 	struct dovefb_layer_info *dfli = fi->par;
-	u32 x;
+	u32 x, irq_ena;
 	int vmode = 0;
 	int gfx_on = 1;
 	int vid_on = 1;
@@ -530,19 +530,19 @@ static int dovefb_ovly_ioctl(struct fb_info *fi, unsigned int cmd,
 	case DOVEFB_IOCTL_SWITCH_VID_OVLY:
 		if (copy_from_user(&vid_on, argp, sizeof(int)))
 			return -EFAULT;
+		x = readl(dfli->reg_base + LCD_SPU_DMA_CTRL0);
+		irq_ena = readl(dfli->reg_base + SPU_IRQ_ENA);
 		if (0 == vid_on) {
-			x = readl(dfli->reg_base + LCD_SPU_DMA_CTRL0) &
-				~CFG_DMA_ENA_MASK;
-			writel(x, dfli->reg_base + LCD_SPU_DMA_CTRL0);
+			x &= ~CFG_DMA_ENA_MASK;
+			irq_ena &= ~(DOVEFB_VID_INT_MASK | DOVEFB_VSYNC_INT_MASK);
 		} else {
-			x = readl(dfli->reg_base + LCD_SPU_DMA_CTRL0) |
-				CFG_DMA_ENA(0x1);
-			writel(x, dfli->reg_base + LCD_SPU_DMA_CTRL0);
+			x |= CFG_DMA_ENA(0x1);
+
 			/* Enable VID & VSync. */
-			x = readl(dfli->reg_base + SPU_IRQ_ENA) |
-				DOVEFB_VID_INT_MASK | DOVEFB_VSYNC_INT_MASK;
-			writel(x, dfli->reg_base + SPU_IRQ_ENA);
+			irq_ena |= DOVEFB_VID_INT_MASK | DOVEFB_VSYNC_INT_MASK;
 		}
+		writel(x, dfli->reg_base + LCD_SPU_DMA_CTRL0);
+		writel(irq_ena, dfli->reg_base + SPU_IRQ_ENA);
 		break;
 	case DOVEFB_IOCTL_SWITCH_GRA_OVLY:
 		if (copy_from_user(&gfx_on, argp, sizeof(int)))
@@ -1252,6 +1252,8 @@ int dovefb_ovly_init(struct dovefb_info *info, struct dovefb_mach_info *dmi)
 	 * Fill in sane defaults.
 	 */
 	dovefb_set_mode(dfli, &fi->var, dmi->modes, dmi->pix_fmt, 0);
+	dfli->surface.viewPortInfo.ycPitch = (fi->var.xres * fi->var.bits_per_pixel) / 8;
+	dfli->surface.viewPortInfo.uvPitch = dfli->surface.viewPortInfo.ycPitch / 2;
 	dovefb_ovly_set_par(fi);
 
 	/*

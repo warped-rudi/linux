@@ -116,24 +116,22 @@ static unsigned long uva_to_pa(struct mm_struct *mm, unsigned long addr)
 unsigned long va_to_pa(unsigned long user_addr, unsigned int size)
 {
 	unsigned long  paddr, paddr_tmp;
-	unsigned long  size_tmp = 0;
-	int page_num = PAGE_ALIGN(size) / PAGE_SIZE;
-	unsigned int vaddr = PAGE_ALIGN(user_addr);
-	int i = 0;
+	int extra_page_count = ((user_addr & ~PAGE_MASK) + size - 1) / PAGE_SIZE;
 	struct mm_struct *mm = current->mm;
 
-	if (vaddr == 0)
+	if (user_addr == 0)
 		return 0;
 
-	paddr = uva_to_pa(mm, vaddr);
+	paddr = uva_to_pa(mm, user_addr);
+	paddr_tmp = paddr;
 
-	for (i = 0; i < page_num; i++) {
-		paddr_tmp = uva_to_pa(mm, vaddr);
-		if ((paddr_tmp - paddr) != size_tmp)
+	while (extra_page_count-- > 0) {
+		user_addr += PAGE_SIZE;
+		paddr_tmp += PAGE_SIZE;
+		if (uva_to_pa(mm, user_addr) != paddr_tmp)
 			return 0;
-		vaddr += PAGE_SIZE;
-		size_tmp += PAGE_SIZE;
 	}
+
 	return paddr;
 }
 
@@ -792,10 +790,7 @@ void bmm_dma_sync()
 
 static long bmm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	unsigned int bmm_arg;
-	unsigned long input;
 	unsigned long output = 0;
-	unsigned long length;
 	ioctl_arg_t io;
 
 	UNUSED_PARAM(filp);
@@ -805,38 +800,33 @@ static long bmm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 	}
 
-	input = io.input;
-	output = io.output;
-	length = io.length;
-	bmm_arg = io.arg;
-
 	pr_debug("bmm_ioctl(cmd=0x%08x, arg=0x%08lx, io=0x%08lx/0x%08lx)\n",
 		cmd, arg, io.input, io.output);
 
 	switch (cmd) {
 	case BMM_MALLOC:
-		output = bmm_malloc(input, bmm_arg);
+		output = bmm_malloc(io.input, io.arg);
 		break;
 	case BMM_FREE:
-		bmm_free(input);
+		bmm_free(io.input);
 		break;
 	case BMM_GET_VIRT_ADDR:
-		output = bmm_get_vaddr_ex(input);
+		output = bmm_get_vaddr_ex(io.input);
 		break;
 	case BMM_GET_PHYS_ADDR:
-		output = bmm_get_paddr_inside_ex(input);
+		output = bmm_get_paddr_inside_ex(io.input);
 		break;
 	case BMM_GET_KERN_PHYS_ADDR:
-		output = bmm_get_paddr_ex(input, length);
+		output = bmm_get_paddr_ex(io.input, io.length);
 		break;
 	case BMM_GET_MEM_ATTR:
-		output = bmm_get_mem_attr(input);
+		output = bmm_get_mem_attr(io.input);
 		break;
 	case BMM_SET_MEM_ATTR:
-		output = bmm_set_mem_attr(input, bmm_arg);
+		output = bmm_set_mem_attr(io.input, io.arg);
 		break;
 	case BMM_GET_MEM_SIZE:
-		output = bmm_get_mem_size(input);
+		output = bmm_get_mem_size(io.input);
 		break;
 	case BMM_GET_TOTAL_SPACE:
 		output = bmm_size;
@@ -848,18 +838,18 @@ static long bmm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		output = bmm_get_allocated_size();
 		break;
 	case BMM_FLUSH_CACHE:
-		output = bmm_flush_cache(input, bmm_arg);
+		output = bmm_flush_cache(io.input, io.arg);
 		break;
 #ifdef BMM_HAS_DMA_MEMCPY
 	case BMM_DMA_MEMCPY:
-		output = bmm_dma_memcpy(input, output, length);
+		output = bmm_dma_memcpy(io.input, io.output, io.length);
 		break;
 	case BMM_DMA_SYNC:
 		bmm_dma_sync();
 		break;
 #endif
 	case BMM_CONSISTENT_SYNC:
-		bmm_consistent_sync(input, length, bmm_arg);
+		bmm_consistent_sync(io.input, io.length, io.arg);
 		break;
 	case BMM_DUMP:
 		bmm_dump_all();
