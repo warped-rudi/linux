@@ -2046,10 +2046,9 @@ int tda19988_configure_tx_inout(int x, int y, int interlaced, int hz)
    mode = resolution_to_video_format[modeIndex].vmode;
 
    if (rateDiff == 0)
-      printk (KERN_INFO "HDMI TX - using video mode %d (exact match)\n",mode);
+      printk (KERN_INFO "HDMI TX - using %s (exact match)\n",tda_spy_vfmt(mode));
    else
-      printk (KERN_INFO "HDMI TX - using video mode %d (requested %dHz, found %dHz)\n",
-              mode,hz,resolution_to_video_format[modeIndex].hz);
+      printk (KERN_INFO "HDMI TX - using %s (requested %dHz)\n",tda_spy_vfmt(mode),hz);
 
    if (initialized) {
       down(&this->driver.sem);
