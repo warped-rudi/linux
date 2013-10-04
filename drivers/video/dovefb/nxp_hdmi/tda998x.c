@@ -73,6 +73,8 @@ static struct cdev our_cdev, *this_cdev=&our_cdev;
 static int initialized = 0;
 static int saved_mode = -1;
 static cec_callback_t cec_callback = NULL;
+static struct work_struct *edid_work_queue = NULL;
+
 
 #ifdef ANDROID_DSS
 static struct omap_video_timings video_640x480at60Hz_panel_timings = {
@@ -940,6 +942,9 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
          By default, let go on with next case and activate
          default video/audio settings with tmdlHdmiTxSetInputOutput()
       */
+      
+      if (edid_work_queue)
+         schedule_work(edid_work_queue);
 
       TRY(tmdlHdmiTxGetEdidSinkType(this->tda.instance,     \
                                     &this->tda.setio.sink));
@@ -1918,6 +1923,12 @@ static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id 
 
 /* CuBox specific stuff */
 /* Addions to get EDID stuff out of the transmitter driver */
+
+void tda19988_register_edid_work(struct work_struct *work_queue)
+{
+   edid_work_queue = work_queue;
+}
+
 const char *tda19988_get_edid(int *num_of_blocks)
 {
    tda_instance* this = &our_instance;
