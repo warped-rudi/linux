@@ -53,6 +53,7 @@ static gceSTATUS
 _GetEvent(
     IN gckEVENT Event,
     OUT gctUINT8 * EventID,
+    IN gcsEVENT_PTR Head,
     IN gceKERNEL_WHERE Source
     )
 {
@@ -60,7 +61,7 @@ _GetEvent(
 	gceSTATUS status;
 	gctBOOL acquired = gcvFALSE;
 
-	gcmkHEADER_ARG("Event=0x%x Source=%d", Event, Source);
+	gcmkHEADER_ARG("Event=0x%x Head=%p Source=%d", Event, Head, Source);
 
 	/* Grab the queue mutex. */
 	gcmkONERROR(gckOS_AcquireMutex(Event->os,
@@ -80,6 +81,7 @@ _GetEvent(
 
             /* Save time stamp of event. */
             Event->queues[id].stamp  = ++(Event->stamp);
+            Event->queues[id].head   = Head;
             Event->queues[id].source = Source;
 
             /* Release the queue mutex. */
@@ -1470,13 +1472,19 @@ gckEVENT_Submit(
 
     gcmkHEADER_ARG("Event=0x%x Wait=%d", Event, Wait);
 
+	/* Acquire the list mutex. */
+	gcmkONERROR(gckOS_AcquireMutex(Event->os, Event->listMutex,
+				       gcvINFINITE));
+	acquired = gcvTRUE;
+
 	/* Only process if we have events queued. */
 	if (Event->list.head != gcvNULL)
 	{
 	    for (;;)
 	    {
 		    /* Allocate an event ID. */
-    		status = _GetEvent(Event, &id, Event->list.source);
+    		status = _GetEvent(Event, &id, Event->list.head,
+    					   Event->list.source);
 
     		if (gcmIS_ERROR(status))
     		{
@@ -1510,16 +1518,6 @@ gckEVENT_Submit(
         }
 
 		gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_EVENT, "Using id=%d", id);
-
-		/* Acquire the list mutex. */
-		gcmkONERROR(gckOS_AcquireMutex(Event->os,
-									   Event->listMutex,
-									   gcvINFINITE));
-		acquired = gcvTRUE;
-
-		/* Copy event list to event ID queue. */
-		Event->queues[id].source = Event->list.source;
-		Event->queues[id].head   = Event->list.head;
 
         /* Get process ID. */
         gcmkONERROR(gckOS_GetProcessID(&Event->queues[id].processID));
@@ -1562,6 +1560,10 @@ gckEVENT_Submit(
         gcmkONERROR(gckCOMMAND_Execute(Event->kernel->command, bytes));
 		reserved = gcvFALSE;
 #endif
+	} else {
+		/* Release the list mutex. */
+		gcmkONERROR(gckOS_ReleaseMutex(Event->os, Event->listMutex));
+		acquired = gcvFALSE;
 	}
 
 	/* Success. */
