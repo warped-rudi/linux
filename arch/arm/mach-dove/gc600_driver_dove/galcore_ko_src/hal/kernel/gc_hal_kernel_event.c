@@ -1464,6 +1464,7 @@ gckEVENT_Submit(
 	gctSIZE_T bytes;
 	gctPOINTER buffer;
 	gceSTATUS status;
+	gctBOOL recacquired = gcvFALSE;
     gctBOOL acquired = gcvFALSE;
 	gctBOOL reserved = gcvFALSE;
 #if gcdGPU_TIMEOUT
@@ -1472,7 +1473,11 @@ gckEVENT_Submit(
 
     gcmkHEADER_ARG("Event=0x%x Wait=%d", Event, Wait);
 
-	/* Acquire the list mutex. */
+	gcmkONERROR(gckOS_AcquireRecMutex(Event->os,
+					  Event->kernel->hardware->recMutexPower,
+					  gcvINFINITE));
+	recacquired = gcvTRUE;
+
 	gcmkONERROR(gckOS_AcquireMutex(Event->os, Event->listMutex,
 				       gcvINFINITE));
 	acquired = gcvTRUE;
@@ -1566,6 +1571,9 @@ gckEVENT_Submit(
 		acquired = gcvFALSE;
 	}
 
+	gcmkVERIFY_OK(gckOS_ReleaseRecMutex(Event->os, Event->kernel->hardware->recMutexPower));
+	recacquired = gcvFALSE;
+
 	/* Success. */
 	gcmkFOOTER_NO();
 	return gcvSTATUS_OK;
@@ -1583,6 +1591,10 @@ OnError:
 	{
 		/* Need to release the command buffer. */
 		gcmkVERIFY_OK(gckCOMMAND_Release(Event->kernel->command));
+	}
+
+	if (recacquired) {
+		gcmkVERIFY_OK(gckOS_ReleaseRecMutex(Event->os, Event->kernel->hardware->recMutexPower));
 	}
 
 	if (id != 0xFF)
