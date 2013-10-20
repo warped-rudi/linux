@@ -132,18 +132,6 @@ _IsEmpty(
     /* Assume the event queue is empty. */
     *IsEmpty = gcvTRUE;
 
-    /* Walk the event queue. */
-    for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
-    {
-        /* Check whether this event is in use. */
-        if (Event->queues[i].head != gcvNULL)
-        {
-            /* The event is in use, hence the queue is not empty. */
-            *IsEmpty = gcvFALSE;
-            break;
-        }
-    }
-
     /* Try acquiring the mutex. */
     status = gckOS_AcquireMutex(Event->os, Event->mutexQueue, 0);
     if (status == gcvSTATUS_TIMEOUT)
@@ -155,6 +143,16 @@ _IsEmpty(
     {
         /* Bail out on error. */
         gcmkONERROR(status);
+
+		/* Walk the event queue. */
+		for (i = 0; i < gcmCOUNTOF(Event->queues); ++i) {
+			/* Check whether this event is in use. */
+			if (Event->queues[i].head != gcvNULL) {
+				/* The event is in use, hence the queue is not empty. */
+				*IsEmpty = gcvFALSE;
+				break;
+			}
+		}
 
         /* Release the mutex. */
         gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->mutexQueue));
