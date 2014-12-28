@@ -752,7 +752,7 @@ bad_options:
 }
 #endif
 
-static int dovefb_init_layer(struct platform_device *pdev,
+static int __init dovefb_init_layer(struct platform_device *pdev,
 		enum dovefb_type type, struct dovefb_info *info,
 		struct resource *res)
 {
