@@ -20,6 +20,13 @@ config MACH_CUBOX
 	help
 	  Say 'Y' here if you want your kernel to support the
 	  SolidRun CuBox platform
+
+config MACH_D2PLUG
+	bool "Marvell D2Plug"
+	help
+	  Say 'Y' here if you want your kernel to support the
+	  Marvell MV88AP510 based D2plug platform.
+
 endmenu
 
 endif

@@ -8,7 +8,7 @@ config FB_DOVE
 	select I2C_MV64XXX
 	select FB_DDC
 	select FB_MODE_HELPERS
-	select TDA19988 if MACH_CUBOX
+	select TDA19988 if (MACH_CUBOX || MACH_D2PLUG)
 	help
 	  Support for Marvell Dove SoC LCD controller.
 

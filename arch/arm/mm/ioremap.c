@@ -240,7 +240,7 @@ void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 	/*
 	 * Don't allow RAM to be mapped - this causes problems with ARMv6+
 	 */
-#ifndef CONFIG_MACH_CUBOX
+#if !(defined(CONFIG_MACH_CUBOX) || defined(CONFIG_MACH_D2PLUG))
 	if (WARN_ON(pfn_valid(pfn)))
 		return NULL;
 #endif

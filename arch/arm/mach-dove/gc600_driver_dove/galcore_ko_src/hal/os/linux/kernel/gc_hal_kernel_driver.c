@@ -59,7 +59,7 @@ static gckGALDEVICE galDevice;
 static int major = 199;
 module_param(major, int, 0644);
 
-#ifdef CONFIG_MACH_CUBOX
+#if defined(CONFIG_MACH_CUBOX) || defined(CONFIG_MACH_D2PLUG)
     int irqLine = 42;
     long registerMemBase = 0xf1840000;
     ulong contiguousBase = 0x8000000;
@@ -814,7 +814,7 @@ static int drv_mmap(struct file * filp, struct vm_area_struct * vma)
         return -ENOTTY;
     }
 
-#ifdef CONFIG_MACH_CUBOX
+#if defined(CONFIG_MACH_CUBOX) || defined(CONFIG_MACH_D2PLUG)
     vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 #else
     vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
