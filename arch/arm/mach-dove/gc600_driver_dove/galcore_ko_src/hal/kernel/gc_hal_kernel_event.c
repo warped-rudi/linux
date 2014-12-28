@@ -53,6 +53,7 @@ static gceSTATUS
 _GetEvent(
     IN gckEVENT Event,
     OUT gctUINT8 * EventID,
+    IN gcsEVENT_PTR Head,
     IN gceKERNEL_WHERE Source
     )
 {
@@ -60,7 +61,7 @@ _GetEvent(
 	gceSTATUS status;
 	gctBOOL acquired = gcvFALSE;
 
-	gcmkHEADER_ARG("Event=0x%x Source=%d", Event, Source);
+	gcmkHEADER_ARG("Event=0x%x Head=%p Source=%d", Event, Head, Source);
 
 	/* Grab the queue mutex. */
 	gcmkONERROR(gckOS_AcquireMutex(Event->os,
@@ -80,6 +81,7 @@ _GetEvent(
 
             /* Save time stamp of event. */
             Event->queues[id].stamp  = ++(Event->stamp);
+            Event->queues[id].head   = Head;
             Event->queues[id].source = Source;
 
             /* Release the queue mutex. */
@@ -130,18 +132,6 @@ _IsEmpty(
     /* Assume the event queue is empty. */
     *IsEmpty = gcvTRUE;
 
-    /* Walk the event queue. */
-    for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
-    {
-        /* Check whether this event is in use. */
-        if (Event->queues[i].head != gcvNULL)
-        {
-            /* The event is in use, hence the queue is not empty. */
-            *IsEmpty = gcvFALSE;
-            break;
-        }
-    }
-
     /* Try acquiring the mutex. */
     status = gckOS_AcquireMutex(Event->os, Event->mutexQueue, 0);
     if (status == gcvSTATUS_TIMEOUT)
@@ -153,6 +143,16 @@ _IsEmpty(
     {
         /* Bail out on error. */
         gcmkONERROR(status);
+
+		/* Walk the event queue. */
+		for (i = 0; i < gcmCOUNTOF(Event->queues); ++i) {
+			/* Check whether this event is in use. */
+			if (Event->queues[i].head != gcvNULL) {
+				/* The event is in use, hence the queue is not empty. */
+				*IsEmpty = gcvFALSE;
+				break;
+			}
+		}
 
         /* Release the mutex. */
         gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->mutexQueue));
@@ -1081,6 +1081,8 @@ gckEVENT_Notify(
 
     for (;;)
     {
+        gcsEVENT_PTR event, next_event;
+
         /* Suspend interrupts. */
         gcmkONERROR(gckOS_SuspendInterrupt(Event->os));
         suspended = gcvTRUE;
@@ -1102,6 +1104,11 @@ gckEVENT_Notify(
 					   "Pending interrupts 0x%08x", pending);
 
 		queue = gcvNULL;
+
+		/* Grab the queue mutex. */
+		gcmkONERROR(gckOS_AcquireMutex(Event->os, Event->mutexQueue,
+					       gcvINFINITE));
+		acquired = gcvTRUE;
 
 #if gcdDEBUG
 		for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
@@ -1136,6 +1143,10 @@ gckEVENT_Notify(
 
 		if (queue == gcvNULL)
 		{
+			/* Release the mutex. */
+			gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->mutexQueue));
+			acquired = gcvFALSE;
+
             gcmkLOG_WARNING_ARGS("Queue is null,interrupts 0x%08x are not pending", pending);
 			gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_EVENT,
 						   "Interrupts 0x%08x are not pending.", pending);
@@ -1163,15 +1174,22 @@ gckEVENT_Notify(
 			}
 		}
 
+		/* Remove events from queue and mark queue free */
+		next_event = queue->head;
+		queue->head = gcvNULL;
+
+		/* Release the mutex. */
+		gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->mutexQueue));
+		acquired = gcvFALSE;
+
 		/* Walk all events for this interrupt. */
-		while (queue->head != gcvNULL)
-		{
-			gcsEVENT_PTR event;
+		while (next_event != gcvNULL) {
 #ifndef __QNXNTO__
 			gctPOINTER logical;
 #endif
 
-			event       = queue->head;
+			event       = next_event;
+			next_event  = event->next;
 
             gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
                 "event->event.command: %d", event->event.command);
@@ -1462,6 +1480,7 @@ gckEVENT_Submit(
 	gctSIZE_T bytes;
 	gctPOINTER buffer;
 	gceSTATUS status;
+	gctBOOL recacquired = gcvFALSE;
     gctBOOL acquired = gcvFALSE;
 	gctBOOL reserved = gcvFALSE;
 #if gcdGPU_TIMEOUT
@@ -1470,13 +1489,23 @@ gckEVENT_Submit(
 
     gcmkHEADER_ARG("Event=0x%x Wait=%d", Event, Wait);
 
+	gcmkONERROR(gckOS_AcquireRecMutex(Event->os,
+					  Event->kernel->hardware->recMutexPower,
+					  gcvINFINITE));
+	recacquired = gcvTRUE;
+
+	gcmkONERROR(gckOS_AcquireMutex(Event->os, Event->listMutex,
+				       gcvINFINITE));
+	acquired = gcvTRUE;
+
 	/* Only process if we have events queued. */
 	if (Event->list.head != gcvNULL)
 	{
 	    for (;;)
 	    {
 		    /* Allocate an event ID. */
-    		status = _GetEvent(Event, &id, Event->list.source);
+    		status = _GetEvent(Event, &id, Event->list.head,
+    					   Event->list.source);
 
     		if (gcmIS_ERROR(status))
     		{
@@ -1510,16 +1539,6 @@ gckEVENT_Submit(
         }
 
 		gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_EVENT, "Using id=%d", id);
-
-		/* Acquire the list mutex. */
-		gcmkONERROR(gckOS_AcquireMutex(Event->os,
-									   Event->listMutex,
-									   gcvINFINITE));
-		acquired = gcvTRUE;
-
-		/* Copy event list to event ID queue. */
-		Event->queues[id].source = Event->list.source;
-		Event->queues[id].head   = Event->list.head;
 
         /* Get process ID. */
         gcmkONERROR(gckOS_GetProcessID(&Event->queues[id].processID));
@@ -1562,7 +1581,14 @@ gckEVENT_Submit(
         gcmkONERROR(gckCOMMAND_Execute(Event->kernel->command, bytes));
 		reserved = gcvFALSE;
 #endif
+	} else {
+		/* Release the list mutex. */
+		gcmkONERROR(gckOS_ReleaseMutex(Event->os, Event->listMutex));
+		acquired = gcvFALSE;
 	}
+
+	gcmkVERIFY_OK(gckOS_ReleaseRecMutex(Event->os, Event->kernel->hardware->recMutexPower));
+	recacquired = gcvFALSE;
 
 	/* Success. */
 	gcmkFOOTER_NO();
@@ -1581,6 +1607,10 @@ OnError:
 	{
 		/* Need to release the command buffer. */
 		gcmkVERIFY_OK(gckCOMMAND_Release(Event->kernel->command));
+	}
+
+	if (recacquired) {
+		gcmkVERIFY_OK(gckOS_ReleaseRecMutex(Event->os, Event->kernel->hardware->recMutexPower));
 	}
 
 	if (id != 0xFF)

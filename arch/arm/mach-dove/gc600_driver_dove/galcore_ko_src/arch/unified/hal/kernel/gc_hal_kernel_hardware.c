@@ -1908,8 +1908,8 @@ gckHARDWARE_Link(
         gcmkONERROR(
 			gckOS_MemoryBarrier(Hardware->os, logical + 1));
 
-		/* Compute number of 64-byte aligned bytes to fetch. */
-		bytes = gcmALIGN(address + FetchSize, 64) - address;
+		/* Compute number of 64-bit aligned bytes to fetch. */
+		bytes = gcmALIGN(address + FetchSize, 8) - address;
 
         /* Append LINK(bytes / 8), FetchAddress. */
         logical[0] = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x08 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))

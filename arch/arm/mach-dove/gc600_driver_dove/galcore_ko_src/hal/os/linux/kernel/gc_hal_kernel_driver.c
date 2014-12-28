@@ -1081,7 +1081,7 @@ static int __devinit gpu_probe(struct platform_device *pdev)
 		goto gpu_probe_fail;
 	}
 	contiguousBase  = res->start;
-	contiguousSize  = res->end-res->start;
+	contiguousSize  = resource_size(res);
 
 	ret = drv_init();
 	if(!ret) {

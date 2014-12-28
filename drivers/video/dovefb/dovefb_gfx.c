@@ -56,6 +56,13 @@ static int dovefb_fill_edid(struct fb_info *fi,
 static int wait_for_vsync(struct dovefb_layer_info *dfli);
 static void dovefb_set_defaults(struct dovefb_layer_info *dfli);
 
+#ifdef CONFIG_TDA19988
+extern const char *tda19988_get_edid(int *num_of_blocks);
+extern void tda19988_register_edid_work(struct work_struct *work_queue);
+extern int tda19988_configure_tx_inout(int x, int y, int interlaced, int hz);
+#endif
+
+
 #define AXI_BASE_CLK	(2000000000ll)	/* 2000MHz */
 
 static const u8 edid_header[] = {
@@ -141,7 +148,7 @@ static void set_clock_divider(struct dovefb_layer_info *dfli,
 	 * 1. Set up reference clock speed.
 	 */
 
-	printk("%s : setup reference clk to %u\n", __FUNCTION__, needed_pixclk);
+	printk(KERN_DEBUG "%s : setup reference clk to %u\n", __func__, needed_pixclk);
 
 	clk_set_rate(info->clk, needed_pixclk);
 	/*
@@ -545,9 +552,6 @@ static u8 *make_analog_fake_edid(void)
 
 	return edid_block;
 }
-#ifdef CONFIG_TDA19988
-extern	int configure_tx_inout(int x, int y, int interlaced, int hz);
-#endif
 
 static int dovefb_gfx_set_par(struct fb_info *fi)
 {
@@ -624,11 +628,12 @@ static int dovefb_gfx_set_par(struct fb_info *fi)
 	x = readl(dfli->reg_base + LCD_SPU_DUMB_CTRL);
 	if ((x & 0x1) == 0)
 		writel(x | 1, dfli->reg_base + LCD_SPU_DUMB_CTRL);
+
 #ifdef CONFIG_TDA19988
-	printk(KERN_INFO "Setting HDMI TX resolution to %dx%d%c @ %d\n",
-		m->xres, m->yres, (m->vmode & FB_VMODE_INTERLACED) ? 'i' : 'p',
-		m->refresh);
-	if (!configure_tx_inout(m->xres, m->yres,
+	printk(KERN_DEBUG "%s: Setting HDMI TX resolution to %dx%d%c @ %d\n",
+	       __func__,m->xres, m->yres, 
+	       (m->vmode & FB_VMODE_INTERLACED) ? 'i' : 'p', m->refresh);
+	if (!tda19988_configure_tx_inout(m->xres, m->yres,
 		(m->vmode & FB_VMODE_INTERLACED) ? 1 : 0, m->refresh))
 		printk(KERN_ERR "Setting HDMI TX mode failed\n");
 #endif
@@ -645,6 +650,7 @@ static int dovefb_pan_display(struct fb_var_screeninfo *var,
 	return 0;
 }
 
+#ifdef CONFIG_PM
 static int dovefb_pwr_off_sram(struct dovefb_layer_info *dfli)
 {
 	unsigned int x;
@@ -674,6 +680,7 @@ static int dovefb_pwr_on_sram(struct dovefb_layer_info *dfli)
 
 	return 0;
 }
+#endif
 
 static int dovefb_blank(int blank, struct fb_info *fi)
 {
@@ -1029,12 +1036,14 @@ static int dovefb_gfx_ioctl(struct fb_info *info, unsigned int cmd,
 		}
 		break;
 	case DOVEFB_IOCTL_SET_EDID_INTERVAL:
+#ifndef CONFIG_TDA19988
 		if (!dfli->ddc_polling_disable) {
 			dfli->edid_info.interval = (arg > 0) ? arg :
 				DEFAULT_EDID_INTERVAL;
 			mod_timer(&dfli->get_edid_timer, jiffies +
 				  dfli->edid_info.interval * HZ);
 		}
+#endif
 		break;
 
 	default:
@@ -1044,6 +1053,7 @@ static int dovefb_gfx_ioctl(struct fb_info *info, unsigned int cmd,
 	return 0;
 }
 
+#ifdef CONFIG_FB_DOVE_CLCD_EDID
 static bool dovefb_edid_block_valid(u8 *raw_edid)
 {
 	int i;
@@ -1147,7 +1157,6 @@ out:
 	return NULL;
 }
 
-#ifdef CONFIG_FB_DOVE_CLCD_EDID
 static u8 *pull_edid_from_i2c(int busid, int addr)
 {
 	struct i2c_adapter *dove_i2c;
@@ -1175,15 +1184,13 @@ static u8 *pull_edid_from_i2c(int busid, int addr)
 }
 #endif
 
-#ifdef CONFIG_TDA19988
-extern char *tda19988_get_edid(int *num_of_blocks);
-#endif
 static u8 *dove_read_edid(struct fb_info *fi, struct dovefb_mach_info *dmi)
 {
 	char *edid_data = NULL;
 #ifdef CONFIG_TDA19988
 	int num_of_blocks;
-	char *nxp_edid;
+	const char *nxp_edid;
+
 	nxp_edid = tda19988_get_edid(&num_of_blocks);
 	if (nxp_edid == NULL) /* EDID not ready */
 		return NULL;
@@ -1516,6 +1523,7 @@ int dovefb_gfx_resume(struct dovefb_layer_info *dfli)
 }
 #endif
 
+#ifndef CONFIG_TDA19988
 static void dynamic_get_edid(unsigned long data)
 {
 	struct dovefb_layer_info *dfli = (struct dovefb_layer_info *) data;
@@ -1524,6 +1532,7 @@ static void dynamic_get_edid(unsigned long data)
 		  dfli->edid_info.interval * HZ);
 	schedule_work(&dfli->work_queue);
 }
+#endif
 
 static bool is_new_edid(u8 *new_edid, struct dovefb_layer_info *dfli)
 {
@@ -1677,12 +1686,17 @@ int dovefb_gfx_init(struct dovefb_info *info, struct dovefb_mach_info *dmi)
 	 */
 	dfli->ddc_polling_disable = dmi->ddc_polling_disable;
 	if (!dmi->ddc_polling_disable) {
+		INIT_WORK(&dfli->work_queue, get_edid_work);
+
+#ifndef CONFIG_TDA19988
 		init_timer(&dfli->get_edid_timer);
 		dfli->get_edid_timer.expires = jiffies + HZ;
 		dfli->get_edid_timer.data = (unsigned long)dfli;
 		dfli->get_edid_timer.function = dynamic_get_edid;
 		add_timer(&dfli->get_edid_timer);
-		INIT_WORK(&dfli->work_queue, get_edid_work);
+#else
+		tda19988_register_edid_work(&dfli->work_queue);
+#endif
 	} else {
 		dfli->edid_info.connect = 1;
 		dfli->edid_info.change = 1;

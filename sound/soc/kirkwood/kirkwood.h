@@ -151,8 +151,8 @@
 
 /* Theses values come from the marvell alsa driver */
 /* need to find where they come from               */
-#define KIRKWOOD_SND_MAX_BUFFER_BYTES		0x40000		// 262144
-#define KIRKWOOD_SND_MAX_PERIOD_BYTES		0x8000		// 32768
+#define KIRKWOOD_SND_MAX_BUFFER_BYTES		0x100000	// 1024K
+#define KIRKWOOD_SND_MAX_PERIOD_BYTES		0x20000		// 128K
 #define KIRKWOOD_SND_MIN_PERIOD_BYTES		0x800		// 512
 #define KIRKWOOD_SND_MAX_PERIODS		(KIRKWOOD_SND_MAX_BUFFER_BYTES/KIRKWOOD_SND_MIN_PERIOD_BYTES)
 #define KIRKWOOD_SND_MIN_PERIODS		8
@@ -166,7 +166,9 @@ struct kirkwood_dma_data {
 	int burst;
 	int i2s;
 	int spdif;
-	int iec958;
+	int iec958raw;
+	int use_i2s;
+	int use_spdif;
 };
 
 #endif
