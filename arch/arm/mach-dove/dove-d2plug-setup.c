@@ -35,8 +35,160 @@
 #include <mach/sdhci.h>
 #include "common.h"
 #include "mpp.h"
+#include <linux/clk-provider.h>
+#include <linux/clkdev.h>
 
 #define DOVE_AVNG_POWER_OFF_GPIO	(8)
+
+static int hdmi_clk_enable(struct clk_hw *hw)
+{
+	int ret;
+
+	ret = gpio_request_one(12, GPIOF_OUT_INIT_HIGH, "HDMI_CKSW");
+	if (ret < 0) {
+		pr_err("%s: failed to setup GPIO for HDMI_CKSW\n", __func__);
+		return ret;
+	}
+
+	ret = gpio_request_one(13, GPIOF_OUT_INIT_HIGH, "HDMI_CKSWET1");
+	if (ret < 0) {
+		pr_err("%s: failed to setup GPIO for HDMI_CKSWET1\n", __func__);
+		goto err_ckswet1;
+	}
+
+	ret = gpio_request_one(14, GPIOF_OUT_INIT_HIGH, "HDMI_CKSWET2");
+	if (ret < 0) {
+		pr_err("%s: failed to setup GPIO for HDMI_CKSWET2\n", __func__);
+		goto err_ckswet2;
+	}
+
+	pr_info("%s: Clock enable success\n", __func__);
+
+	return 0;
+
+err_ckswet1:
+	gpio_free(12);
+err_ckswet2:
+	gpio_free(13);
+
+	return ret;
+}
+
+static void hdmi_clk_disable(struct clk_hw *hw)
+{
+	pr_info("%s: Freeing GPIO for HDMI Clock\n", __func__);
+	gpio_free(12);
+	gpio_free(13);
+	gpio_free(14);
+}
+
+static int hdmi_clk_setrate(struct clk_hw *hw, unsigned long rate,
+		unsigned long parent)
+{
+	pr_info("%s: Requested rate is %lu\n", __func__, rate);
+
+	switch (rate) {
+	case 27000000:
+		gpio_set_value(12, 1);
+	case 74250000:
+		gpio_set_value(12, 0);
+		gpio_set_value(13, 0);
+		gpio_set_value(14, 0);
+		break;
+	case 74176000:
+		gpio_set_value(12, 1);
+		gpio_set_value(13, 1);
+		gpio_set_value(14, 0);
+		break;
+	case 148500000:
+		gpio_set_value(12, 1);
+		gpio_set_value(13, 0);
+		gpio_set_value(14, 1);
+		break;
+	case 148352000:
+		gpio_set_value(12, 1);
+		gpio_set_value(13, 1);
+		gpio_set_value(14, 1);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static long hdmi_clk_roundrate(struct clk_hw *hw, unsigned long rate,
+		unsigned long *parent)
+{
+	pr_info("%s: Requested rate %lu\n", __func__, rate);
+
+	/*
+	 * Ignoring last three digits as we are only checking
+	 * upto three decimal places
+	 */
+
+	rate = rate/1000;
+
+	pr_info("%s: Final calcuated rate %lu\n", __func__, rate);
+
+	switch (rate) {
+	case 27000:
+	case 74250:
+	case 74176:
+	case 148500:
+	case 148352:
+		return rate * 1000;
+	default:
+		return 0;
+	}
+}
+
+unsigned long hdmi_clk_recalcrate(struct clk_hw *hw, unsigned long parent)
+{
+	return 148500000;
+}
+
+const struct clk_ops hdmi_clk_ops = {
+	.enable = hdmi_clk_enable,
+	.disable = hdmi_clk_disable,
+	.set_rate = hdmi_clk_setrate,
+	.round_rate = hdmi_clk_roundrate,
+	.recalc_rate = hdmi_clk_recalcrate,
+};
+
+static struct clk_init_data hdmi_clk_initdata = {
+	.name = "hdmi_clk",
+	.ops = &hdmi_clk_ops,
+	.flags = CLK_IS_ROOT,
+};
+
+static struct clk_hw hdmi_hw_clk = {
+	.init = &hdmi_clk_initdata,
+};
+
+static int __init setup_hdmi_clk(void)
+{
+	struct clk *clk;
+	struct clk_lookup *cl;
+
+	clk = clk_register(NULL, &hdmi_hw_clk);
+	if (IS_ERR(clk)) {
+		pr_err("%s: Error registring HDMI clock (%ld)\n",
+				__func__, PTR_ERR(clk));
+		return PTR_ERR(clk);
+	}
+	pr_info("%s: Clock register success", __func__);
+
+	cl = clkdev_alloc(clk, "hdmi_clk", NULL);
+	if (cl) {
+		clkdev_add(cl);
+	} else {
+		pr_err("%s: Unable to allocate clock lookup\n", __func__);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
 
 /*
  * HDMI & VGA Setup
@@ -52,7 +204,7 @@ static struct dovefb_mach_info dove_d2plug_lcd0_dmi = {
 	.id_gfx			= "GFX Layer 0",
 	.id_ovly		= "Video Layer 0",
 	.clk_src		= MRVL_EXT_CLK1,
-	.clk_name		= "accurate_LCDCLK",
+	.clk_name		= "hdmi_clk",
 	.pix_fmt		= PIX_FMT_RGB888PACK,
 	.io_pin_allocation	= IOPAD_DUMB24,
 	.panel_rgb_type		= DUMB24_RGB888_0,
@@ -446,6 +598,7 @@ static void __init dove_d2plug_init(void)
 	dove_d2plug_gpio_init();
 
 	dove_hwmon_init();
+	setup_hdmi_clk();
 
 	dove_ge00_init(&dove_d2plug_ge00_data);
 	dove_ehci0_init();
