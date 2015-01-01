@@ -1023,12 +1023,12 @@ static int __init_refok dovefb_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	if (!option) {
-#if 1
-		return -ENODEV;
-#else
+#ifdef CONFIG_FB_DOVE_CLCD_DEFAULT_OPTION
 		printk(KERN_WARNING "DoveFB: No kernel parameters provided, "
 				"using default.\n");
 		option = CONFIG_FB_DOVE_CLCD_DEFAULT_OPTION;
+#else
+		return -ENODEV;
 #endif
 	}
 	/*
@@ -1195,7 +1195,6 @@ static int dovefb_resume(struct platform_device *pdev)
 				"dovefb_enable_lcd0() failed.\n");
 		return -1;
 	}
-
 
 	if (dovefb_gfx_resume(dfi->gfx_plane)) {
 		printk(KERN_INFO "dovefb_resume(): "

@@ -12,6 +12,11 @@ config FB_DOVE
 	help
 	  Support for Marvell Dove SoC LCD controller.
 
+config FB_DOVE_CLCD_DEFAULT_OPTION
+	string "Default Dove FB kernel parameter"
+	depends on FB_DOVE && MACH_D2PLUG
+	default "lcd0:1920x1080-16@60,lcd1:1024x768-16@60-edid"
+
 config TDA19988
 	bool "NXP TDA19988 HDMI transmitter"
 	depends on FB && ARCH_DOVE
