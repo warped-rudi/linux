@@ -38,7 +38,11 @@
 #define TX_NAME "tda998X"
 #define TDA998X_I2C_SLAVEADDRESS 0x70
 
+#ifdef CONFIG_MACH_CUBOX
 #define TDA_IRQ_CALIB 27
+#else
+#define TDA_IRQ_CALIB 8
+#endif
 
 #define EDID_BLOCK_COUNT 4
 #define EDID_BLOCK_SIZE 128

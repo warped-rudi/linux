@@ -32,7 +32,11 @@
 #define CEC_NAME "tda99Xcec"
 #define TDA99XCEC_I2C_SLAVEADDRESS 0x34
 
+#ifdef CONFIG_MACH_CUBOX
 #define TDA_IRQ_CALIB 27
+#else
+#define TDA_IRQ_CALIB 8
+#endif
 #define POLLING_LENGTH 3
 
 #define EDID_BLOCK_COUNT    4
