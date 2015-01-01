@@ -1053,27 +1053,26 @@ static int hdmi_tx_init(tda_instance *this)
 #ifdef TMFL_TDA19989
    this->tda.setio.video_out.dviVqr = TMDL_HDMITX_VQR_DEFAULT; /* Use HDMI rules for DVI output */
 #endif
-/*       this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_31_1920x1080p_50Hz; */
+   /*    this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_31_1920x1080p_50Hz; */
    /*    this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_PC_640x480p_60Hz; */
    /*    this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_PC_640x480p_72Hz; */
-      this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_04_1280x720p_60Hz; 
-//     this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_16_1920x1080p_60Hz;
+   /*    this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_04_1280x720p_60Hz; */
    /*    this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_19_1280x720p_50Hz; */
-/*       this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_02_720x480p_60Hz; */
-//   this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_NULL;
+   /* this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_02_720x480p_60Hz; */
+	this->tda.setio.video_out.format = TMDL_HDMITX_VFMT_16_1920x1080p_60Hz;
+
    this->tda.setio.video_in.mode = TMDL_HDMITX_VINMODE_RGB444;
    /*    this->tda.setio.video_in.mode = TMDL_HDMITX_VINMODE_CCIR656; */
    /*    this->tda.setio.video_in.mode = TMDL_HDMITX_VINMODE_YUV422; */
    this->tda.setio.video_in.format = this->tda.setio.video_out.format;
    this->tda.setio.video_in.pixelRate = TMDL_HDMITX_PIXRATE_SINGLE;
    this->tda.setio.video_in.syncSource = TMDL_HDMITX_SYNCSRC_EXT_VS; /* we use HS,VS as synchronisation source */
-//   this->tda.setio.video_in.syncSource = TMDL_HDMITX_SYNCSRC_EXT_VREF; /* we use HS,VS as synchronisation source */
 
-#if 0
+#ifdef CONFIG_MACH_D2PLUG
    this->tda.setio.audio_in.format = TMDL_HDMITX_AFMT_I2S;
    this->tda.setio.audio_in.rate = TMDL_HDMITX_AFS_44K;
    this->tda.setio.audio_in.i2sFormat = TMDL_HDMITX_I2SFOR_PHILIPS_L;
-   this->tda.setio.audio_in.i2sQualifier = TMDL_HDMITX_I2SQ_16BITS;
+   this->tda.setio.audio_in.i2sQualifier = TMDL_HDMITX_I2SQ_32BITS;
    this->tda.setio.audio_in.dstRate = TMDL_HDMITX_DSTRATE_SINGLE; /* not relevant here */
    this->tda.setio.audio_in.channelAllocation = 0; /* audio channel allocation (Ref to CEA-861D p85) */
    /* audio channel allocation (Ref to CEA-861D p85) */
@@ -1550,11 +1549,11 @@ static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long 
          {
             BUG_ON(copy_from_user(&this->tda.setio,(tda_set_in_out*)arg,sizeof(tda_set_in_out)) != 0);
 
-            /*             TRY(tmdlHdmiTxSetInputOutput(this->tda.instance, \ */
-            /*                                          this->tda.setio.video_in, \ */
-            /*                                          this->tda.setio.video_out, \ */
-            /*                                          this->tda.setio.audio_in, \ */
-            /*                                          this->tda.setio.sink)); */
+                         TRY(tmdlHdmiTxSetInputOutput(this->tda.instance, \
+                                                      this->tda.setio.video_in, \
+                                                      this->tda.setio.video_out, \
+                                                      this->tda.setio.audio_in, \
+                                                      this->tda.setio.sink));
             break;
          }
 
@@ -1921,9 +1920,8 @@ static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id 
    return err;
 }
 
-/* CuBox specific stuff */
+/* CuBox & D2Plug specific stuff */
 /* Addions to get EDID stuff out of the transmitter driver */
-
 void tda19988_register_edid_work(struct work_struct *work_queue)
 {
    edid_work_queue = work_queue;
@@ -2130,7 +2128,6 @@ TRY_DONE:
    up(&this->driver.sem);
 }
 
-
 /*
  *  I2C client :: destroy
  */
@@ -2270,6 +2267,7 @@ static ssize_t audio_store(struct device *dev,
      TMDL_HDMITX_DSTRATE_SINGLE, 
      channel:0
    */
+
    memcpy(&audio,&this->tda.setio.audio_in,sizeof(audio));
    sscanf(buf,desc_format,           \
           &audio.format,             \
@@ -2286,7 +2284,7 @@ static ssize_t audio_store(struct device *dev,
                               this->tda.setio.audio_in,     \
                               this->tda.setio.sink);
    }
-   return size;//0;
+   return size;
 }
 
 
@@ -2574,13 +2572,39 @@ static void __exit tx_exit(void)
    i2c_del_driver(&this_i2c_driver);
 }
 
+int tda_config_audioin(tda_audio_in *audio_in)
+{
+	tda_instance *this = &our_instance;
+	tda_audio_in audio;
+
+	if (!initialized)
+		return -ENODEV;
+
+	memcpy(&audio, &this->tda.setio.audio_in, sizeof(audio));
+	audio.format = audio_in->format;
+	audio.rate = audio_in->rate;
+	audio.i2sFormat = audio_in->i2sFormat;
+	audio.i2sQualifier = audio_in->i2sQualifier;
+	audio.dstRate = audio_in->dstRate;
+	audio.channelAllocation = audio_in->channelAllocation;
+
+	if (memcmp(&this->tda.setio.audio_in, &audio, sizeof(audio))) {
+		tda_spy_audio(&this->tda.setio.audio_in);
+		memcpy(&this->tda.setio.audio_in,&audio, sizeof(audio));
+		tmdlHdmiTxSetAudioInput(this->tda.instance,
+				this->tda.setio.audio_in,
+				this->tda.setio.sink);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(tda_config_audioin);
 
 /*
  *  Module
  *  ------
  */
 late_initcall(tx_init);
-//module_init(tx_init);
 module_exit(tx_exit);
 
 /*
