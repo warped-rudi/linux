@@ -243,7 +243,7 @@ static inline void kirkwood_set_rate(struct kirkwood_dma_data* priv,
 				     unsigned long rate)
 {
 	/* prefer external clk, if present */
-	if (!IS_ERR(priv->extclk)) {
+	if (priv->extclk) {
 		DPRINTK("extclk set rate = %lu -> %lu\n", rate, 256*rate);
 		if (clk_set_rate(priv->extclk, 256*rate) == 0) {
 			writel(KIRKWOOD_MCLK_SOURCE_EXTCLK,
@@ -786,7 +786,7 @@ static __devexit int kirkwood_i2s_dev_remove(struct platform_device *pdev)
 	struct kirkwood_dma_data *priv = dev_get_drvdata(&pdev->dev);
 
 	snd_soc_unregister_dai(&pdev->dev);
-	if (!IS_ERR(priv->extclk)) {
+	if (priv->extclk) {
 		clk_disable_unprepare(priv->extclk);
 		clk_put(priv->extclk);	
 	}
