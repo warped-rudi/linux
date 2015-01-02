@@ -407,6 +407,28 @@ static struct spi_board_info __initdata dove_d2plug_spi_flash_info[] = {
 };
 
 /*
+ * Sound Card support
+ */
+
+/* HDMI */
+static struct platform_device d2plug_hdmi = {
+	.name		= "d2plug-audio",
+	.id		= 0,
+};
+
+/* Audio Jack */
+static struct platform_device d2plug_audio_jack = {
+	.name		= "d2plug-audio",
+	.id		= 1,
+};
+
+/* TDA19988 Audio Codec Driver */
+static struct platform_device tda19988_codec = {
+	.name		= "tda19988-codec",
+	.id		= -1,
+};
+
+/*
  * NAND
  *
  * TODO: Add support for on-board nand
@@ -594,7 +616,7 @@ static void __init dove_d2plug_init(void)
 	 */
 	dove_init();
 
-	dove_mpp_conf(d2plug_mpp_list, d2plug_mpp_grp_list, 1, 0);
+	dove_mpp_conf(d2plug_mpp_list, d2plug_mpp_grp_list, 0, 0);
 	dove_d2plug_gpio_init();
 
 	dove_hwmon_init();
@@ -620,8 +642,12 @@ static void __init dove_d2plug_init(void)
 	dove_vmeta_init();
 	dove_d2plug_clcd_init();
 
-	dove_i2s0_init();
-	dove_i2s1_init();
+	/* Audio Init */
+	dove_i2s0_init(1, 0);
+	dove_i2s1_init(1, 0);
+	platform_device_register(&tda19988_codec);
+	platform_device_register(&d2plug_hdmi);
+	platform_device_register(&d2plug_audio_jack);
 
 	i2c_register_board_info(0, dove_d2plug_i2c_bus0_devs,
 			ARRAY_SIZE(dove_d2plug_i2c_bus0_devs));
