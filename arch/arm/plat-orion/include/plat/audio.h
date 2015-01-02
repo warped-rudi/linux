@@ -3,5 +3,7 @@
 
 struct kirkwood_asoc_platform_data {
 	int burst;
+	int use_i2s;
+	int use_spdif;
 };
 #endif

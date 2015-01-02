@@ -9,6 +9,14 @@ config SND_KIRKWOOD_SOC
 config SND_KIRKWOOD_SOC_I2S
 	tristate
 
+config SND_KIRKWOOD_SOC_MODE_SEL
+	bool "Kirkwood/Dove Leagacy selection for I2S and S/PDIF"
+	default y
+	depends on SND_KIRKWOOD_SOC_I2S
+	help
+	  Say Y or N if you want to use legacy style selection of I2C and S/PDIF
+	  modes for Kirkwood/Dove Audio controller.
+
 config SND_KIRKWOOD_SOC_SPDIF
 	tristate "SoC Audio support for Kirkwood generic S/PDIF"
 	depends on SND_KIRKWOOD_SOC

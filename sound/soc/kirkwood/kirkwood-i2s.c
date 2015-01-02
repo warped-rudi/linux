@@ -728,9 +728,13 @@ static __devinit int kirkwood_i2s_dev_probe(struct platform_device *pdev)
 
 	priv->burst = data->burst;
 
-	// TODO: extend kirkwood_asoc_platform_data to control this from outside !
+#ifdef CONFIG_SND_KIRKWOOD_SOC_MODE_SEL
 	priv->use_i2s = (pdev->id == 0);
 	priv->use_spdif = (pdev->id == 1);
+#else
+	priv->use_i2s = data->use_i2s;
+	priv->use_spdif = data->use_spdif;
+#endif
 
 	priv->clk = clk_get(&pdev->dev, NULL);
 	if (IS_ERR(priv->clk)) {
