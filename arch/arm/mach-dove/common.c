@@ -562,11 +562,21 @@ static struct platform_device dove_pcm0_device = {
 	.id             = 0,
 };
 
+#ifdef CONFIG_KIRKWOOD_SPDIF_I2S_SEL
 void __init dove_i2s0_init(void)
 {
 	platform_device_register(&dove_i2s0_device);
 	platform_device_register(&dove_pcm0_device);
 }
+#else
+void __init dove_i2s0_init(int use_i2s, int use_spdif)
+{
+	dove_i2s0_data.use_i2s = use_i2s;
+	dove_i2s0_data.use_spdif = use_spdif;
+	platform_device_register(&dove_i2s0_device);
+	platform_device_register(&dove_pcm0_device);
+}
+#endif
 
 static struct resource dove_i2s1_resources[] = {
 	[0] = {
@@ -600,11 +610,21 @@ static struct platform_device dove_pcm1_device = {
 	.id             = 1,
 };
 
+#ifdef CONFIG_SND_KIRKWOOD_SOC_MODE_SEL
 void __init dove_i2s1_init(void)
 {
 	platform_device_register(&dove_i2s1_device);
 	platform_device_register(&dove_pcm1_device);
 }
+#else
+void __init dove_i2s1_init(int use_i2s, int use_spdif)
+{
+	dove_i2s1_data.use_i2s = use_i2s;
+	dove_i2s1_data.use_spdif = use_spdif;
+	platform_device_register(&dove_i2s1_device);
+	platform_device_register(&dove_pcm1_device);
+}
+#endif
 
 /*****************************************************************************
  * General

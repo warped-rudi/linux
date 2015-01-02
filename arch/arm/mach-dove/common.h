@@ -40,8 +40,13 @@ void dove_spi1_init(void);
 void dove_i2c_init(void);
 void dove_sdio0_init(struct sdhci_dove_platform_data *);
 void dove_sdio1_init(struct sdhci_dove_platform_data *);
+#ifdef CONFIG_SND_KIRKWOOD_SOC_MODE_SEL
 void dove_i2s0_init(void);
 void dove_i2s1_init(void);
+#else
+void dove_i2s0_init(int use_i2s, int use_spdif);
+void dove_i2s1_init(int use_i2s, int use_spdif);
+#endif
 void dove_restart(char, const char *);
 void dove_vmeta_init(void);
 void dove_gpu_init(void);
