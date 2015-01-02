@@ -376,10 +376,6 @@ static struct mv643xx_eth_platform_data dove_d2plug_ge00_data = {
 	.phy_addr = MV643XX_ETH_PHY_ADDR_DEFAULT,
 };
 
-static struct sdhci_dove_platform_data d2plug_sdio_data = {
-	.gpio_cd = 16,
-};
-
 /*
  * SATA
  */
@@ -634,8 +630,8 @@ static void __init dove_d2plug_init(void)
 	dove_uart2_init();
 
 	dove_i2c_init();
-	dove_sdio0_init(&d2plug_sdio_data);
-	dove_sdio1_init(&d2plug_sdio_data);
+	dove_sdio0_init(NULL);
+	dove_sdio1_init(NULL);
 	/* dove_d2plug_nfc_init(); */
 
 	dove_gpu_init();
