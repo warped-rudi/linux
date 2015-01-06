@@ -425,6 +425,17 @@ static struct platform_device tda19988_codec = {
 };
 
 /*
+ * SDIO Platform Data
+ */
+static struct sdhci_dove_platform_data d2plug_sdio0_data = {
+	.gpio_cd = -EINVAL,
+};
+
+static struct sdhci_dove_platform_data d2plug_sdio1_data = {
+	.gpio_cd = -EINVAL,
+};
+
+/*
  * NAND
  *
  * TODO: Add support for on-board nand
@@ -582,6 +593,13 @@ static void __init dove_d2plug_gpio_init(void)
 	if (gpio_request_one(2, GPIOF_OUT_INIT_LOW, "LED_O2") != 0)
 		pr_err("Dove: failed to setup GPIO for LED_O2\n");
 
+	orion_gpio_set_valid(3, 1);
+	orion_gpio_set_valid(4, 1);
+	orion_gpio_set_valid(5, 1);
+	orion_gpio_set_valid(6, 1);
+	orion_gpio_set_valid(7, 1);
+	orion_gpio_set_valid(8, 1);
+
 	orion_gpio_set_valid(11, 1);
 	if (gpio_request_one(11, GPIOF_IN, "AUDIO_INT") != 0)
 		pr_err("Dove: failed to setup GPIO for AUDIO_INT\n");
@@ -630,8 +648,12 @@ static void __init dove_d2plug_init(void)
 	dove_uart2_init();
 
 	dove_i2c_init();
-	dove_sdio0_init(NULL);
-	dove_sdio1_init(NULL);
+
+	/* SD Setup */
+	dove_sdio_int_wa(&d2plug_sdio0_data, 0);
+	dove_sdio0_init(&d2plug_sdio0_data);
+	dove_sdio_int_wa(&d2plug_sdio1_data, 1);
+	dove_sdio1_init(&d2plug_sdio1_data);
 	/* dove_d2plug_nfc_init(); */
 
 	dove_gpu_init();
