@@ -46,7 +46,7 @@ static int tda19988_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_codec *codec = dai->codec;
 	struct tda_audio_config audio;
 
-	dev_info(codec->dev, "Hello... %s\n", __func__);
+	dev_dbg(codec->dev, "Entered %s\n", __func__);
 
 	audio.format = TMDL_HDMITX_AFMT_I2S;
 	audio.i2sFormat = TMDL_HDMITX_I2SFOR_PHILIPS_L;
