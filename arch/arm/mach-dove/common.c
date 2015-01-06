@@ -32,6 +32,7 @@
 #include <mach/dove.h>
 #include <mach/pm.h>
 #include <mach/bridge-regs.h>
+#include <mach/sdhci.h>
 #include <asm/mach/arch.h>
 #include <linux/irq.h>
 #include <plat/clock.h>
@@ -467,6 +468,11 @@ void __init dove_xor1_init(void)
  ****************************************************************************/
 static u64 sdio_dmamask = DMA_BIT_MASK(32);
 
+struct sdhci_dove_int_wa sdhci0_wa = {
+	.gpio = DOVE_SD0_START_GPIO + 3,
+	.func_select_bit = 0
+};
+
 static struct resource dove_sdio0_resources[] = {
 	{
 		.start	= DOVE_SDIO0_PHYS_BASE,
@@ -497,6 +503,11 @@ void __init dove_sdio0_init(struct sdhci_dove_platform_data *sdio0_data)
 	platform_device_register(&dove_sdio0);
 }
 
+struct sdhci_dove_int_wa sdhci1_wa = {
+	.gpio = DOVE_SD1_START_GPIO + 3,
+	.func_select_bit = 1
+};
+
 static struct resource dove_sdio1_resources[] = {
 	{
 		.start	= DOVE_SDIO1_PHYS_BASE,
@@ -525,6 +536,47 @@ void __init dove_sdio1_init(struct sdhci_dove_platform_data *sdio1_data)
 {
 	dove_sdio1.dev.platform_data = sdio1_data;
 	platform_device_register(&dove_sdio1);
+}
+
+void __init dove_sdio_int_wa(struct sdhci_dove_platform_data *sdio_data,
+		int port)
+{
+	int gpio = 0, i, irq = 0;
+	char *name;
+
+	if (!sdio_data || sdio_data->sdhci_wa)
+		return;
+
+	switch (port) {
+	case 0:
+		gpio = DOVE_SD0_START_GPIO;
+		name = "sd0";
+		sdio_data->sdhci_wa = &sdhci0_wa;
+		break;
+	case 1:
+		gpio = DOVE_SD1_START_GPIO;
+		name = "sd1";
+		sdio_data->sdhci_wa = &sdhci1_wa;
+		break;
+	default:
+		pr_err("dove_sd_card_int_wa_setup: bad port (%d)\n", port);
+		return;
+	}
+
+	irq = gpio_to_irq(sdio_data->sdhci_wa->gpio);
+	sdio_data->sdhci_wa->irq = irq;
+
+	for (i = gpio; i < (gpio + 6); i++) {
+		orion_gpio_set_valid(i, 1);
+
+		if (gpio_request(i, name) != 0) {
+			pr_err("dove: failed to config gpio (%d) for %s\n",
+			       i, name);
+		}
+
+		gpio_direction_input(i);
+	}
+	irq_set_irq_type(irq, IRQ_TYPE_LEVEL_LOW);
 }
 
 /*****************************************************************************

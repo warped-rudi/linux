@@ -975,6 +975,17 @@ static void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 
 	WARN_ON(host->cmd);
 
+	if (host->ops->gpio_irq_disable)
+		host->ops->gpio_irq_disable(host);
+
+	if (cmd->data && (cmd->data->blksz & 0x3)) {
+		printk(KERN_ERR "%s: Unsupported block size (%d)!\n",
+		       mmc_hostname(host->mmc), cmd->data->blksz);
+		cmd->error = -EINVAL;
+		tasklet_schedule(&host->finish_tasklet);
+		return;
+	}
+
 	/* Wait max 10 ms */
 	timeout = 10;
 
@@ -1573,6 +1584,11 @@ static void sdhci_enable_sdio_irq_nolock(struct sdhci_host *host, int enable)
 	if (host->flags & SDHCI_DEVICE_DEAD)
 		goto out;
 
+	if (host->ops && host->ops->enable_sdio_irq) {
+		host->ops->enable_sdio_irq(host, enable);
+		goto out;
+	}
+
 	if (enable)
 		host->flags |= SDHCI_SDIO_IRQ_ENABLED;
 	else
@@ -2056,6 +2072,10 @@ static void sdhci_tasklet_finish(unsigned long param)
 #endif
 
 	mmiowb();
+
+	if (host->ops->gpio_irq_enable)
+		host->ops->gpio_irq_enable(host);
+
 	spin_unlock_irqrestore(&host->lock, flags);
 
 	mmc_request_done(host->mmc, mrq);

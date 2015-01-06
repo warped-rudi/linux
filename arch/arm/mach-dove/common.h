@@ -40,6 +40,7 @@ void dove_spi1_init(void);
 void dove_i2c_init(void);
 void dove_sdio0_init(struct sdhci_dove_platform_data *);
 void dove_sdio1_init(struct sdhci_dove_platform_data *);
+void dove_sdio_int_wa(struct sdhci_dove_platform_data *, int);
 #ifdef CONFIG_SND_KIRKWOOD_SOC_MODE_SEL
 void dove_i2s0_init(void);
 void dove_i2s1_init(void);

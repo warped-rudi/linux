@@ -17,9 +17,20 @@
 #ifndef __ASM_ARM_ARCH_DOVE_SDHCI_H
 #define __ASM_ARM_ARCH_DOVE_SDHCI_H
 
+#define DOVE_SD0_START_GPIO	40
+#define DOVE_SD1_START_GPIO	46
+
+struct sdhci_dove_int_wa {
+	int			gpio;
+	int			irq;
+	int			func_select_bit;
+	int			status;
+};
+
 struct sdhci_dove_platform_data {
 	struct clk* clk;
 	int gpio_cd;
+	struct sdhci_dove_int_wa *sdhci_wa;
 };
 
 #endif

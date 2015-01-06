@@ -31,6 +31,84 @@
 
 #include "sdhci-pltfm.h"
 
+irqreturn_t sdhci_dove_gpio_irq(int irq, void *dev_id)
+{
+	struct sdhci_host* host = dev_id;
+#ifdef VERBOSE
+	DBG("*** %s got gpio interrupt\n",
+		mmc_hostname(host->mmc));
+#endif
+
+#ifdef VERBOSE
+	sdhci_dumpregs(host);
+#endif
+	mmc_signal_sdio_irq(host->mmc);
+
+	return IRQ_HANDLED;
+}
+
+static void enable_sdio_gpio_irq(struct sdhci_host *host, int enable)
+{
+	struct sdhci_pltfm_host *mv_host = sdhci_priv(host);
+	struct sdhci_dove_platform_data *plat = mv_host->priv;
+	unsigned long flags;
+	struct sdhci_dove_int_wa *wa_info;
+
+	if (!plat->sdhci_wa)
+		return;
+
+	wa_info = plat->sdhci_wa;
+	spin_lock_irqsave(&host->lock, flags);
+
+	if (enable) {
+		if (wa_info->status == 0) {
+			enable_irq(wa_info->irq);
+			wa_info->status = 1;
+		}
+	} else {
+		if (wa_info->status == 1) {
+			disable_irq_nosync(wa_info->irq);
+			wa_info->status = 0;
+		}
+	}
+
+	mmiowb();
+
+	spin_unlock_irqrestore(&host->lock, flags);
+}
+
+static void sdhci_sdio_gpio_irq_enable(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *mv_host = sdhci_priv(host);
+	struct sdhci_dove_platform_data *plat = mv_host->priv;
+	u32 mpp_ctrl4;
+
+	if (!plat->sdhci_wa)
+		return;
+
+	mpp_ctrl4 = readl(DOVE_MPP_CTRL4_VIRT_BASE);
+	mpp_ctrl4 |= 1 << plat->sdhci_wa->func_select_bit;
+	writel(mpp_ctrl4, DOVE_MPP_CTRL4_VIRT_BASE);
+
+	mmiowb();
+}
+
+static void sdhci_sdio_gpio_irq_disable(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *mv_host = sdhci_priv(host);
+	struct sdhci_dove_platform_data *plat = mv_host->priv;
+	u32 mpp_ctrl4;
+
+	if (!plat->sdhci_wa)
+		return;
+
+	mpp_ctrl4 = readl(DOVE_MPP_CTRL4_VIRT_BASE);
+	mpp_ctrl4 &= ~(1 << plat->sdhci_wa->func_select_bit);
+	writel(mpp_ctrl4, DOVE_MPP_CTRL4_VIRT_BASE);
+
+	mmiowb();
+}
+
 static irqreturn_t sdhci_dove_carddetect_irq(int irq, void *data)
 {
 	struct sdhci_host *host = (struct sdhci_host *)data;
@@ -82,6 +160,8 @@ default:
 }
 
 static struct sdhci_ops sdhci_dove_ops = {
+	.gpio_irq_enable = sdhci_sdio_gpio_irq_enable,
+	.gpio_irq_disable = sdhci_sdio_gpio_irq_disable,
 	.read_w	= sdhci_dove_readw,
 	.read_l	= sdhci_dove_readl,
 };
@@ -109,6 +189,18 @@ static int __devinit sdhci_dove_probe(struct platform_device *pdev)
 	host = platform_get_drvdata(pdev);
 	pltfm_host = sdhci_priv(host);
 	plat = pdev->dev.platform_data;
+	if (plat->sdhci_wa) {
+		sdhci_dove_pdata.ops->enable_sdio_irq = enable_sdio_gpio_irq;
+		ret = devm_request_irq(&pdev->dev, plat->sdhci_wa->irq,
+				sdhci_dove_gpio_irq, IRQF_TRIGGER_LOW,
+				mmc_hostname(host->mmc), host);
+		if (ret) {
+			dev_err(&pdev->dev, "cannot request wa irq\n");
+			goto dove_probe_err_irq;
+		}
+		disable_irq_nosync(plat->sdhci_wa->irq);
+	}
+
 	pltfm_host->priv = plat;
 
 	if (plat) {
@@ -117,6 +209,9 @@ static int __devinit sdhci_dove_probe(struct platform_device *pdev)
 		plat->clk = clk_get(&pdev->dev, NULL);
 		if (!IS_ERR(plat->clk))
 			clk_prepare_enable(plat->clk);
+
+		if (!gpio_is_valid(plat->gpio_cd))
+			goto dove_probe_done;
 
 		ret = gpio_request(plat->gpio_cd, "sdhci-cd");
 		if (ret) {
@@ -134,12 +229,15 @@ static int __devinit sdhci_dove_probe(struct platform_device *pdev)
 		}
 	}
 
+dove_probe_done:
 	return 0;
 
 dove_probe_err_cd_irq:
 	if (plat && gpio_is_valid(plat->gpio_cd))
 		gpio_free(plat->gpio_cd);
 dove_probe_err_cd_req:
+	devm_free_irq(&pdev->dev, plat->sdhci_wa->irq, host);
+dove_probe_err_irq:
 	sdhci_pltfm_unregister(pdev);
 	return ret;
 }
