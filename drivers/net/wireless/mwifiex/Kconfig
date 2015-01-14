@@ -9,6 +9,17 @@ config MWIFIEX
 	  If you choose to build it as a module, it will be called
 	  mwifiex.
 
+config MWIFIEX_ENABLE_AP_INTERFACE
+	bool "Create WiFi-Ex Driver AP Network Interface"
+	depends on MWIFIEX
+	default n
+	---help---
+	  This option creates a AP network interface for marvell
+	  wifi-ex driver. That interface will be named as uap.
+
+	  Select this option if you want to create AP interface for
+	  mwifiex driver.
+
 config MWIFIEX_SDIO
 	tristate "Marvell WiFi-Ex Driver for SD8786/SD8787/SD8797"
 	depends on MWIFIEX && MMC
