@@ -83,7 +83,7 @@ static void sdhci_sdio_gpio_irq_enable(struct sdhci_host *host)
 	struct sdhci_dove_platform_data *plat = mv_host->priv;
 	u32 mpp_ctrl4;
 
-	if (!plat->sdhci_wa)
+	if (!plat || !plat->sdhci_wa)
 		return;
 
 	mpp_ctrl4 = readl(DOVE_MPP_CTRL4_VIRT_BASE);
@@ -99,7 +99,7 @@ static void sdhci_sdio_gpio_irq_disable(struct sdhci_host *host)
 	struct sdhci_dove_platform_data *plat = mv_host->priv;
 	u32 mpp_ctrl4;
 
-	if (!plat->sdhci_wa)
+	if (!plat || !plat->sdhci_wa)
 		return;
 
 	mpp_ctrl4 = readl(DOVE_MPP_CTRL4_VIRT_BASE);
