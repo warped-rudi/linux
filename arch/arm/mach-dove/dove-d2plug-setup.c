@@ -575,24 +575,48 @@ static unsigned int d2plug_mpp_grp_list[] __initdata = {
 	0
 };
 
+static struct gpio_led gpio_leds[] = {
+	{
+		.name			= "d2plug::wifi-rx",
+		.default_trigger	= "netdev",
+		.gpio			= 0,
+		.active_low		= true,
+	},
+	{
+		.name			= "d2plug::wifi-tx",
+		.default_trigger	= "netdev",
+		.gpio			= 1,
+		.active_low		= true,
+	},
+	{
+		.name			= "d2plug::hdd",
+		.default_trigger	= "mmc0",
+		.gpio			= 2,
+		.active_low		= true,
+	},
+};
+
+static struct gpio_led_platform_data gpio_led_info = {
+	.leds           = gpio_leds,
+	.num_leds       = ARRAY_SIZE(gpio_leds),
+};
+
+static struct platform_device leds_gpio = {
+	.name   = "leds-gpio",
+	.id     = -1,
+	.dev    = {
+		.platform_data  = &gpio_led_info,
+	},
+};
+
 /*
  * GPIO
  */
 static void __init dove_d2plug_gpio_init(void)
 {
-	/* TODO: GPIO LEDs maybe on trigger? */
 	orion_gpio_set_valid(0, 1);
-	if (gpio_request_one(0, GPIOF_OUT_INIT_LOW, "LED_O0") != 0)
-		pr_err("Dove: failed to setup GPIO for LED_O0\n");
-	
 	orion_gpio_set_valid(1, 1);
-	if (gpio_request_one(1, GPIOF_OUT_INIT_LOW, "LED_O1") != 0)
-		pr_err("Dove: failed to setup GPIO for LED_O1\n");
-
 	orion_gpio_set_valid(2, 1);
-	if (gpio_request_one(2, GPIOF_OUT_INIT_LOW, "LED_O2") != 0)
-		pr_err("Dove: failed to setup GPIO for LED_O2\n");
-
 	orion_gpio_set_valid(3, 1);
 	orion_gpio_set_valid(4, 1);
 	orion_gpio_set_valid(5, 1);
@@ -632,6 +656,7 @@ static void __init dove_d2plug_init(void)
 
 	dove_mpp_conf(d2plug_mpp_list, d2plug_mpp_grp_list, 0, 0);
 	dove_d2plug_gpio_init();
+	platform_device_register(&leds_gpio);
 
 	dove_hwmon_init();
 	setup_hdmi_clk();
