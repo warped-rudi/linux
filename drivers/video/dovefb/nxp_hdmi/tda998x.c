@@ -766,11 +766,17 @@ void show_video(tda_instance *this)
    if (is_ready_for_output(this)) {
 
       hdcp_off(this);
+
       TRY(tmdlHdmiTxSetInputOutput(this->tda.instance,         \
                                    this->tda.setio.video_in,   \
                                    this->tda.setio.video_out,  \
                                    this->tda.setio.audio_in,   \
                                    this->tda.setio.sink));
+
+      TRY(tmdlHdmiTxSetVideoInfoframe(this->tda.instance, \
+                                      this->tda.video_infoframe.enable, \
+                                      &this->tda.video_infoframe.data));
+
       hdcp_on(this);
       /*
          Mind that SetInputOutput disable the blue color matrix settings of tmdlHdmiTxSetBScreen ...
@@ -1109,6 +1115,11 @@ static int hdmi_tx_init(tda_instance *this)
    /*    this->tda.src_address = 0x1000; /\* debug *\/ */
    this->tda.src_address = NO_PHY_ADDR; /* it's unref */
    this->tda.src_address_prev = NO_PHY_ADDR;
+
+// Rudi - indicate underscan
+   this->tda.video_infoframe.enable = 1;
+   this->tda.video_infoframe.data.scanInformation = 2;
+
    initialized = 1;
  TRY_DONE:
    return err;
