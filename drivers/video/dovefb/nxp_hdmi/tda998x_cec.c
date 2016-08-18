@@ -1201,7 +1201,11 @@ static long this_cdev_ioctl(struct file *pFile, unsigned int cmd, unsigned long 
                   wake_up_interruptible(&this->driver.wait_write);
                }
 
-               err = cec_listen_single(this, CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST);
+               if (edid_phy_addr() == 0xFFFF)
+                 err = -EAGAIN;
+               else
+                 err = cec_listen_single(this, CEC_LOGICAL_ADDRESS_UNREGISTRED_BROADCAST);
+
                if (err) {
                   this->driver.raw_mode = 0;
                   this->driver.write_pending = 1;
