@@ -825,6 +825,7 @@ typedef tmdlHdmiCECDeviceType_t cec_device_type;
 enum {
    CEC_RX_PKT  = 0x01,
    CEC_ACK_PKT = 0x02,
+   CEC_HPD_PKT = 0x03,
 
    CEC_WAITING = 0x80,
    CEC_RELEASE,
