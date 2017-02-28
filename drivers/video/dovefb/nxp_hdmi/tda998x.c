@@ -795,29 +795,29 @@ static void interrupt_polling(struct work_struct *dummy)
 {
    tda_instance *this = &our_instance;
    tmdlHdmiTxEvent_t prevEvent;
-   int err = 0, loopCnt=0;
+   int loopCnt=0;
 
    do {
       prevEvent = this->tda.event;
 
       /* Tx part */
-      TRY(tmdlHdmiTxHandleInterrupt(this->tda.instance));
+      tmdlHdmiTxHandleInterrupt(this->tda.instance);
 
       /* CEC part */
       if (this->driver.cec_callback)
          this->driver.cec_callback(dummy);
 
+#ifdef IRQ
+      if (__gpio_get_value(this->driver.gpio) == 1)
+         break;
+#endif
+
    } while (this->tda.event != prevEvent && ++loopCnt < 4 );
    
-
- TRY_DONE:
-
    /* setup next polling */
 #ifndef IRQ
    mod_timer(&this->driver.no_irq_timer,jiffies + ( CHECK_EVERY_XX_MS * HZ / 1000 ));
 #endif
-
-   (void)0;
 }
 
 /*
@@ -882,31 +882,30 @@ void unregister_cec_interrupt(void)
 }
 EXPORT_SYMBOL(unregister_cec_interrupt);
 
-static DECLARE_WORK(wq_irq, interrupt_polling);
-void polling_timeout(unsigned long arg)
-{
-   /* derefered because ATOMIC context of timer does not support I2C_transfert */
-   schedule_work(&wq_irq);
-}
-
 static DECLARE_WORK(wq_hdcp, hdcp_check);
-void hdcp_check_timeout(unsigned long arg)
+static void hdcp_check_timeout(unsigned long arg)
 {
    /* derefered because ATOMIC context of timer does not support I2C_transfert */
    schedule_work(&wq_hdcp);
 }
 
+static DECLARE_WORK(wq_irq, interrupt_polling);
 #ifdef IRQ
 /*
  *  TDA irq
  */
 static irqreturn_t tda_irq(int irq, void *_udc)
 {
-
    /* do it now */
    schedule_work(&wq_irq);
 
    return IRQ_HANDLED;
+}
+#else
+static void polling_timeout(unsigned long arg)
+{
+   /* derefered because ATOMIC context of timer does not support I2C_transfert */
+   schedule_work(&wq_irq);
 }
 #endif
 
