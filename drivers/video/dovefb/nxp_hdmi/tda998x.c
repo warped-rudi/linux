@@ -73,7 +73,8 @@ static struct cdev our_cdev, *this_cdev=&our_cdev;
 static int initialized = 0;
 static int saved_mode = -1;
 static cec_callback_t cec_callback = NULL;
-static struct work_struct *edid_work_queue = NULL;
+static struct work_struct *edid_work_item = NULL;
+static struct workqueue_struct *hdmi_work_queue = NULL;
 
 
 #ifdef ANDROID_DSS
@@ -886,7 +887,7 @@ static DECLARE_WORK(wq_hdcp, hdcp_check);
 static void hdcp_check_timeout(unsigned long arg)
 {
    /* derefered because ATOMIC context of timer does not support I2C_transfert */
-   schedule_work(&wq_hdcp);
+   queue_work(hdmi_work_queue, &wq_hdcp);
 }
 
 static DECLARE_WORK(wq_irq, interrupt_polling);
@@ -897,7 +898,7 @@ static DECLARE_WORK(wq_irq, interrupt_polling);
 static irqreturn_t tda_irq(int irq, void *_udc)
 {
    /* do it now */
-   schedule_work(&wq_irq);
+   queue_work(hdmi_work_queue, &wq_irq);
 
    return IRQ_HANDLED;
 }
@@ -905,7 +906,7 @@ static irqreturn_t tda_irq(int irq, void *_udc)
 static void polling_timeout(unsigned long arg)
 {
    /* derefered because ATOMIC context of timer does not support I2C_transfert */
-   schedule_work(&wq_irq);
+   queue_work(hdmi_work_queue, &wq_irq);
 }
 #endif
 
@@ -948,8 +949,8 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
          default video/audio settings with tmdlHdmiTxSetInputOutput()
       */
       
-      if (edid_work_queue)
-         schedule_work(edid_work_queue);
+      if (edid_work_item)
+         queue_work(hdmi_work_queue, edid_work_item);
 
       TRY(tmdlHdmiTxGetEdidSinkType(this->tda.instance,     \
                                     &this->tda.setio.sink));
@@ -1875,6 +1876,8 @@ static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id 
    this->driver.poll_done = true; /* currently idle */
    init_waitqueue_head(&this->driver.wait);
 
+   hdmi_work_queue = create_singlethread_workqueue("tda998x irq workqueue");
+
 #ifdef IRQ
    if (0){// FIXME client->irq > 0) {
 //      this->driver.gpio = irq_to_gpio(client->irq);
@@ -1928,15 +1931,18 @@ static int this_i2c_probe(struct i2c_client *client, const struct i2c_device_id 
    LOG(KERN_INFO,"this->driver.i2c_client removed\n");
    this->driver.i2c_client = NULL;
 
+   destroy_workqueue(hdmi_work_queue);
+   hdmi_work_queue = NULL;
+
    return err;
 }
 
 /* CuBox specific stuff */
 /* Addions to get EDID stuff out of the transmitter driver */
 
-void tda19988_register_edid_work(struct work_struct *work_queue)
+void tda19988_register_edid_work(struct work_struct *work_item)
 {
-   edid_work_queue = work_queue;
+   edid_work_item = work_item;
 }
 
 const char *tda19988_get_edid(int *num_of_blocks)
@@ -2165,6 +2171,9 @@ static int this_i2c_remove(struct i2c_client *client)
       return -ENODEV;
    }
    this->driver.i2c_client = NULL;
+
+   destroy_workqueue(hdmi_work_queue);
+   hdmi_work_queue = NULL;
 
    return err;
 }
