@@ -929,8 +929,13 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
 
    switch (event) {
    case TMDL_HDMITX_EDID_RECEIVED:
-      TRY(tmdlHdmiTxGetEdidSourceAddress(this->tda.instance,        \
-                                         &new_addr));
+      /*
+        /!\ WARNING /!                                              \
+        This callback may arrive even though the EDID is not yet ready
+      */
+      msleep(150);
+
+      TRY(tmdlHdmiTxGetEdidSourceAddress(this->tda.instance, &new_addr));
       LOG(KERN_INFO,"phy.@:%x\n",new_addr);
 
       if (new_addr == this->tda.src_address)
@@ -942,6 +947,7 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
 #if defined (TMFL_TDA19989) || defined (TMFL_TDA9984) 
       tda_spy(this->param.verbose>=1);
 #endif
+
       /* 
          Customer may add stuff to analyse EDID (see tda_spy())
          and select automatically some video/audio settings.
@@ -952,13 +958,12 @@ static void eventCallbackTx(tmdlHdmiTxEvent_t event)
       if (edid_work_item)
          queue_work(hdmi_work_queue, edid_work_item);
 
-      TRY(tmdlHdmiTxGetEdidSinkType(this->tda.instance,     \
-                                    &this->tda.setio.sink));
+      TRY(tmdlHdmiTxGetEdidSinkType(this->tda.instance, &this->tda.setio.sink));
+
       if (TMDL_HDMITX_SINK_HDMI != this->tda.setio.sink) {
          printk(KERN_INFO "/!\\ CAUTION /!\\ sink is not HDMI but %s\n",tda_spy_sink(this->tda.setio.sink));
       }
       
-      msleep(100);
       /*
         /!\ WARNING /!                                              \
         the core driver does not send any HPD nor RXSENS when HDMI was plugged after at boot time
