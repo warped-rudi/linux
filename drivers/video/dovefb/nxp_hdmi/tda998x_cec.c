@@ -630,15 +630,15 @@ static void cec_interrupt(struct work_struct *dummy)
       /* send active msg when hdmi has been abled */
       cec_on(this);
 
-#ifndef GUI_OVER_HDMI
-      this->cec.source_status = CEC_POWER_STATUS_ON;
-#endif
-
-      if (this->driver.raw_mode)
-      {
+      if (this->driver.raw_mode) {
          this->cec.phy_addr = new_phy_addr;
+         this->cec.source_status = CEC_POWER_STATUS_ON;
          eventCallbackCEC(TMDL_HDMICEC_CALLBACK_STATUS, NULL, 0);
       }
+#ifndef GUI_OVER_HDMI
+      else
+         this->cec.source_status = CEC_POWER_STATUS_ON;
+#endif
    }
    /* new phy addr means new EDID, mean HPD ! */
    else if ((this->cec.phy_addr != new_phy_addr) &&
@@ -2147,7 +2147,9 @@ static ssize_t this_cdev_write(struct file *pFile, const char *buffer, size_t le
    
    down(&this->driver.sem);
 
-   if (this->driver.write_pending || this->cec.source_status != CEC_POWER_STATUS_ON) {
+   if (this->driver.write_pending ||
+       this->cec.phy_addr == 0xFFFF ||
+       this->cec.source_status != CEC_POWER_STATUS_ON) {
       up(&this->driver.sem);
       return -EAGAIN;
    }
@@ -2194,7 +2196,7 @@ static unsigned int this_cdev_poll(struct file *pFile, poll_table *poll_data)
       if (this->driver.read_queue_head != this->driver.read_queue_tail)
          mask |= POLLIN | POLLRDNORM;	/* readable */
 
-      if (!this->driver.write_pending && this->cec.source_status == CEC_POWER_STATUS_ON)
+      if (!this->driver.write_pending || this->cec.source_status != CEC_POWER_STATUS_ON)
          mask |= POLLOUT | POLLWRNORM;	/* writable */
 
    } else {
