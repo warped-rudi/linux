@@ -2170,9 +2170,6 @@ static ssize_t this_cdev_write(struct file *pFile, const char *buffer, size_t le
    }
 
    up(&this->driver.sem);
-
-   msleep(20);
-
    return bytes_written;
 
  TRY_DONE:
